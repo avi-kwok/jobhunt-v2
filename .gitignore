@@ -17,8 +17,7 @@ jobhunt.db.bak-*
 logs/
 *.log
 
-# generated
-companies.resolved.yaml
+# generated (companies.resolved.yaml is tracked: the worker needs the ATS endpoints)
 unresolved.txt
 applications/
 

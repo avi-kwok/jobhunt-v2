@@ -1,11 +1,11 @@
-"""v1 title/location prefilter + freshness/dedupe helpers (no LLM in v2)."""
+"""Title/location prefilter + freshness/dedupe helpers (no LLM)."""
 
 from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
 
-from .models import Criteria, Job, MatchResult
+from .models import Criteria, Job
 
 NO_LOCATION_TIER = 5
 REMOTE_KEYWORDS = ("remote",)
@@ -138,8 +138,3 @@ def prefilter(
             return False, tier
 
     return True, tier
-
-
-def composite_key(match: MatchResult) -> tuple[int, int, int]:
-    """Batch sort key: company priority, then location tier, then higher score first."""
-    return (match.company_priority, match.location_tier, -match.score)

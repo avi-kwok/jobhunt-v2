@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class Job(BaseModel):
@@ -26,18 +26,8 @@ class Job(BaseModel):
 
     @property
     def uid(self) -> str:
-        """Stable identity used for dedupe in the seen-store."""
+        """Stable identity used for dedupe in the dedupe."""
         return f"{self.source}:{self.company}:{self.external_id}"
-
-
-class MatchResult(BaseModel):
-    """Outcome of matching a job against my criteria."""
-
-    is_match: bool
-    score: int = Field(ge=0, le=100)  # 0-100
-    reason: str
-    location_tier: int  # 1 (best) .. 5 (none); set by matcher
-    company_priority: int  # 1 (top) .. 4 (default); from the priority dict
 
 
 class CompanyConfig(BaseModel):
@@ -68,9 +58,9 @@ class Criteria(BaseModel):
     exclude_exempt_terms: list[str] = []
     location_match_required: bool = True
     # Only notify on postings whose own timestamp is within this many minutes.
-    # None/0 disables the timestamp filter (rely on the seen-store alone).
+    # None/0 disables the timestamp filter (rely on the dedupe alone).
     # Sources without a reliable timestamp (Workday; Greenhouse gives edit-time)
-    # are always included — the seen-store guarantees "new since last scan".
+    # are always included — the dedupe guarantees "new since last scan".
     freshness_minutes: float | None = None
 
 

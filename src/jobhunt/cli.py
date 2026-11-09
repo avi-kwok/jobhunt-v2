@@ -32,8 +32,9 @@ security.load_env()
 
 LOGS_DIR = Path("logs")
 LAST_RUN_PATH = LOGS_DIR / "last_run.json"
-CRON_LOG_PATH = LOGS_DIR / "cron.log"
-# cron.log is appended on EVERY cron fire (incl. quiet-hour skips), so a stale
+CRON_LOG_PATH = LOGS_DIR / "worker.log"
+# worker.log is appended on EVERY cron fire (incl. quiet-hour skips and flock skips: the
+# shell opens the redirect before running the command), so a stale
 # mtime is the reliable "the box/scheduler is dead" signal.
 CRON_STALE_MINUTES = 90
 
@@ -407,6 +408,91 @@ def keygen() -> None:
     typer.echo(crypto.generate_secret_key())
 
 
+REQUIRED_ENV = ("DATABASE_URL", "JOBHUNT_SECRET_KEY", "ADMIN_WEBHOOK_URL")
+
+
+def run_doctor() -> list[tuple[str, bool, str]]:
+    """Worker health checks as (name, ok, detail). Details never contain secret values."""
+    checks: list[tuple[str, bool, str]] = []
+    for name in REQUIRED_ENV:
+        ok = bool(os.environ.get(name, "").strip())
+        checks.append((f"env {name}", ok, "set" if ok else "missing"))
+    admin = os.environ.get("ADMIN_WEBHOOK_URL", "").strip()
+    if admin:
+        try:
+            webhooks.parse(admin)
+            checks.append(("ADMIN_WEBHOOK_URL format", True, "valid Discord webhook"))
+        except webhooks.WebhookError:
+            checks.append(("ADMIN_WEBHOOK_URL format", False, "not a Discord webhook URL"))
+
+    url = os.environ.get("DATABASE_URL", "").strip()
+    if not url:
+        checks.append(("database reachable", False, "skipped: DATABASE_URL missing"))
+        checks.append(("schema version", False, "skipped: database not checked"))
+    else:
+        conn = None
+        try:
+            conn = v2db.connect(url, ensure_schema=False)
+            conn.execute("SELECT 1").fetchone()
+            checks.append(("database reachable", True, conn.backend))
+        except Exception as exc:  # noqa: BLE001 - class name only; messages can echo the URL
+            checks.append(("database reachable", False, type(exc).__name__))
+        if conn is not None:
+            try:
+                have = v2db.schema_version(conn)
+                ok = have == v2db.SCHEMA_VERSION
+                detail = f"{have}" if ok else (
+                    f"found {have}, need {v2db.SCHEMA_VERSION}: run `jobhunt db init`"
+                )
+                checks.append(("schema version", ok, detail))
+            except Exception:  # noqa: BLE001 - table missing on a fresh database
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+                checks.append(("schema version", False, "not initialised: run `jobhunt db init`"))
+            conn.close()
+        else:
+            checks.append(("schema version", False, "skipped: database unreachable"))
+
+    min_ep = 50
+    try:
+        n = sum(1 for c in load_config().companies if c.ats)
+        checks.append(
+            (
+                "company endpoints",
+                n >= min_ep,
+                f"{n} resolved" if n >= min_ep else f"{n} resolved, need >= {min_ep}: "
+                "companies.resolved.yaml missing or stale (run `git pull`)",
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(("company endpoints", False, f"config not loadable: {type(exc).__name__}"))
+
+    try:
+        probe = "doctor-probe"
+        ok = crypto.decrypt_url(crypto.encrypt_url(probe)) == probe
+        checks.append(("secret key round-trip", ok, "ok" if ok else "mismatch"))
+    except crypto.CryptoError as exc:
+        checks.append(("secret key round-trip", False, str(exc)))  # messages never hold the key
+    return checks
+
+
+@app.command()
+def doctor() -> None:
+    """Check env vars, database, schema version, company endpoints and secret key. Exit 1 on any failure."""
+    checks = run_doctor()
+    table = Table(title="jobhunt doctor")
+    for col in ("Check", "Status", "Detail"):
+        table.add_column(col)
+    for name, ok, detail in checks:
+        table.add_row(name, "[green]PASS[/]" if ok else "[red]FAIL[/]", detail)
+    console.print(table)
+    if not all(ok for _, ok, _ in checks):
+        raise typer.Exit(1)
+    console.print("[green]All checks passed.[/]")
+
+
 subscriber_app = typer.Typer(help="Manage subscribers (admin).", no_args_is_help=True)
 app.add_typer(subscriber_app, name="subscriber")
 
@@ -675,11 +761,11 @@ def heartbeat(
     cron_mtime = _mtime(CRON_LOG_PATH)
     now = datetime.now(timezone.utc)
 
-    # Health verdict: cron.log fires on EVERY scheduled run, so a fresh mtime is
+    # Health verdict: worker.log fires on EVERY scheduled run, so a fresh mtime is
     # the liveness proof. Missing file -> unknown/unhealthy.
     if cron_mtime is None:
         healthy = False
-        status_text = "no cron.log found — scheduler may never have run"
+        status_text = "no worker.log found — scheduler may never have run"
     else:
         age_min = int((now - cron_mtime).total_seconds() // 60)
         healthy = age_min <= CRON_STALE_MINUTES

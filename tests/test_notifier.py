@@ -6,18 +6,16 @@ from datetime import datetime, timezone
 
 import pytest
 
-from jobhunt.notifier import _embed, _posted_display
-from jobhunt.models import Job, MatchResult
+from jobhunt.notifier import _posted_display, alert_embed
+from jobhunt.models import Job
 
 
-def _match() -> MatchResult:
-    return MatchResult(
-        is_match=True, score=90, reason="great", location_tier=1, company_priority=1
-    )
+def _embed(job: Job) -> dict:
+    return alert_embed(job, 1, 1, "internship", ["swe"])
 
 
 def _posted_field(job: Job) -> str:
-    fields = {f["name"]: f["value"] for f in _embed(job, _match())["fields"]}
+    fields = {f["name"]: f["value"] for f in _embed(job)["fields"]}
     return fields["Posted"]
 
 
@@ -29,7 +27,7 @@ def test_posted_display_exact_timestamp_uses_discord_markdown():
     epoch = int(datetime(2026, 7, 3, 14, 21, tzinfo=timezone.utc).timestamp())
     assert _posted_display(job) == f"<t:{epoch}:f> (<t:{epoch}:R>)"
     # exact timestamp also drives the embed footer time
-    assert _embed(job, _match())["timestamp"].startswith("2026-07-03T14:21")
+    assert _embed(job)["timestamp"].startswith("2026-07-03T14:21")
 
 
 def test_posted_display_naive_timestamp_treated_as_utc():
@@ -47,7 +45,7 @@ def test_posted_display_falls_back_to_relative_note():
         posted_at=None, posted_note="Posted Today",
     )
     assert _posted_field(job) == "Posted Today"
-    assert "timestamp" not in _embed(job, _match())  # no exact time -> no footer time
+    assert "timestamp" not in _embed(job)  # no exact time -> no footer time
 
 
 def test_posted_display_unknown_when_nothing_available():

@@ -3,8 +3,9 @@
 Goal: a user gives a Discord webhook URL; jobhunt sends them SWE-and-adjacent internship/co-op
 alerts for Canada and the US. No LLM anywhere. Running cost target: $0.
 
-Built so far: the multi-user core and the website (FastAPI on Vercel, `src/jobhunt/web/`). The
-Oracle worker deployment comes in a later phase. History: `docs/v2-phase0.md`.
+Components: the website (FastAPI on Vercel, `src/jobhunt/web/`), the worker (cron on an Oracle
+Always Free VM, `deploy/v2/`) and one Supabase free Postgres they share. First deploy and
+operations: `docs/RUNBOOK.md`. History: `docs/v2-phase0.md`.
 
 ## Pipeline (`jobhunt scan`)
 
@@ -25,7 +26,8 @@ the subscriber at once. Any other failure counts one failed cycle; 5 in a row di
 resets `fail_count` and sets `last_ok_at`.
 
 `jobhunt heartbeat` posts to `ADMIN_WEBHOOK_URL` only: active subscribers, postings in 24h,
-deliveries sent and failed in 24h, plus cron liveness.
+deliveries sent and failed in 24h, plus cron liveness (mtime of `logs/worker.log`, which cron
+appends to on every fire; stale after 90 min).
 
 ## Database (`db.py`, schema version 2)
 
@@ -98,9 +100,28 @@ string, so it can appear in hosting request logs; treat those logs as sensitive.
 Web env vars: `DATABASE_URL` (Supabase transaction pooler), `JOBHUNT_SECRET_KEY`,
 `PUBLIC_BASE_URL`.
 
+## Worker (`deploy/v2/`)
+
+`worker-setup.sh` is idempotent and targets a new Oracle Always Free A1.Flex VM (Ubuntu 22.04 or
+24.04, aarch64, IPv4 only): installs Python 3.11+ (deadsnakes on 22.04), `postgresql-client-17`
+from the PGDG apt repo (`PG_CLIENT_VERSION` overrides; its major must be >= the server's, check
+`SHOW server_version`), clones or pulls the repo to `~/jobhunt-v2`, builds `.venv`, creates `.env`
+(mode 600) only if missing, sets the system clock to UTC, and replaces a marker-delimited crontab block:
+
+| Job | Schedule (UTC) | Log |
+|---|---|---|
+| `flock -n logs/scan.lock timeout 1800 jobhunt scan` | every 30 min | `logs/worker.log` |
+| `jobhunt heartbeat` | 16:00 daily | `logs/heartbeat.log` |
+| `deploy/v2/backup.sh` (`pg_dump -Fc`, keep 7 newest in `~/backups`) | 09:00 daily | `logs/backup.log` |
+
+The worker connects through the Supabase **session pooler** (port 5432): the direct host can be
+IPv6-only, the shared pooler is IPv4. `jobhunt doctor` checks the three required env vars,
+database reachability, schema version, and a key encrypt/decrypt round-trip; it prints no secret
+values and exits non-zero on any failure. v2 shares no VM, database or webhook with v1.
+
 ## CLI
 
-`scan`, `heartbeat`, `list-matches`, `db init`, `keygen`,
+`scan`, `heartbeat`, `list-matches`, `db init`, `keygen`, `doctor`,
 `subscriber add --webhook-env VAR --countries CA,US --levels internship,coop` (admin: validates,
 encrypts, activates now), `subscriber list`, `subscriber remove ID`. `--db` takes a SQLite path or
 a postgres URL; default is `DATABASE_URL` if set, else `jobhunt_v2.db`.
@@ -109,14 +130,14 @@ a postgres URL; default is `DATABASE_URL` if set, else `jobhunt_v2.db`.
 
 | Var | Used by |
 |---|---|
-| `JOBHUNT_SECRET_KEY` | encrypt/decrypt/hash webhooks (required for non-dry-run scan, `subscriber add`) |
-| `DATABASE_URL` | Postgres connection; unset = SQLite. Web: Supabase transaction pooler URL (6543) |
+| `JOBHUNT_SECRET_KEY` | encrypt/decrypt/hash webhooks (web, non-dry-run scan, `subscriber add`, `doctor`); identical on Vercel and the worker |
+| `DATABASE_URL` | Postgres connection; unset = SQLite. Web: transaction pooler (6543). Worker: session pooler (5432) |
 | `PUBLIC_BASE_URL` | web only: origin used in the manage links |
-| `ADMIN_WEBHOOK_URL` | heartbeat destination (admin channel) |
+| `ADMIN_WEBHOOK_URL` | heartbeat destination (admin channel), `doctor` |
 | `JOBHUNT_CONTACT` | optional contact in the scraper User-Agent |
 | `JOBHUNT_TEST_DATABASE_URL` | tests only; enables the Postgres test runs |
 
 ## Tests
 
-`.venv/bin/pytest -q` runs on SQLite. With `JOBHUNT_TEST_DATABASE_URL=postgresql://localhost:54329/jobhunt_test`
+`.venv/bin/pytest -q` runs on SQLite (includes `doctor`, crontab rendering and backup-retention tests; the `shellcheck` test runs if installed). With `JOBHUNT_TEST_DATABASE_URL=postgresql://localhost:54329/jobhunt_test`
 the db/pipeline tests also run on Postgres (local server in `.pgdata/`, gitignored).

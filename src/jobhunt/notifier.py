@@ -1,14 +1,12 @@
-"""Notification sinks. Discord webhook is the default; the protocol is swappable."""
+"""Discord webhook sink: alert embeds, status embeds, redacted HTTP errors."""
 
 from __future__ import annotations
 
 from datetime import timezone
-from typing import Protocol, runtime_checkable
 
 import httpx
 
-from .matcher import composite_key
-from .models import Job, MatchResult
+from .models import Job
 from .security import redact
 
 # tier -> (label, embed color)
@@ -36,11 +34,6 @@ class DiscordHTTPError(RuntimeError):
         self.status_code = status_code
 
 
-@runtime_checkable
-class Notifier(Protocol):
-    def send(self, matches: list[tuple[Job, MatchResult]]) -> None: ...
-
-
 def _posted_display(job: Job) -> str:
     """When the posting was put up, for the embed.
 
@@ -57,36 +50,6 @@ def _posted_display(job: Job) -> str:
     if job.posted_note:
         return job.posted_note
     return "unknown"
-
-
-def _embed(job: Job, match: MatchResult) -> dict:
-    prio_label, color = PRIORITY_LABELS.get(
-        match.company_priority, PRIORITY_LABELS[4]
-    )
-    loc_label = LOCATION_LABELS.get(match.location_tier, "Other")
-    embed = {
-        "title": job.title[:250],
-        "url": job.url,
-        "color": color,
-        "fields": [
-            {"name": "Company", "value": f"{job.company} ({prio_label})", "inline": True},
-            {
-                "name": "Location",
-                "value": f"{job.location or 'unspecified'} · {loc_label}",
-                "inline": True,
-            },
-            {"name": "Score", "value": str(match.score), "inline": True},
-            {"name": "Posted", "value": _posted_display(job), "inline": True},
-            {"name": "Why", "value": (match.reason or "-")[:1000], "inline": False},
-        ],
-    }
-    # An exact timestamp also drives the embed footer time.
-    if job.posted_at is not None:
-        posted = job.posted_at
-        if posted.tzinfo is None:
-            posted = posted.replace(tzinfo=timezone.utc)
-        embed["timestamp"] = posted.isoformat()
-    return embed
 
 
 def alert_embed(
@@ -149,14 +112,6 @@ class DiscordNotifier:
             if self._client is None:
                 client.close()
 
-    def send(self, matches: list[tuple[Job, MatchResult]]) -> None:
-        if not matches:
-            return
-        ordered = sorted(matches, key=lambda pair: composite_key(pair[1]))
-        embeds = [_embed(job, match) for job, match in ordered]
-        for i in range(0, len(embeds), MAX_EMBEDS_PER_MESSAGE):
-            self._post(embeds[i : i + MAX_EMBEDS_PER_MESSAGE])
-
     def send_embeds(self, embeds: list[dict]) -> None:
         """Post pre-built embeds, at most MAX_EMBEDS_PER_MESSAGE per HTTP call."""
         for i in range(0, len(embeds), MAX_EMBEDS_PER_MESSAGE):
@@ -167,7 +122,7 @@ class DiscordNotifier:
     ) -> None:
         """Post one informational status embed (title + name/value fields).
 
-        No-ops if there are no fields. Raises via `_post` (same as `send`) when
+        No-ops if there are no fields. Raises via `_post` (same as `send_embeds`) when
         the webhook URL is unset, so callers get consistent behaviour.
         """
         if not fields:

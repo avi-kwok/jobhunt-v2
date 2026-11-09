@@ -91,7 +91,7 @@ def test_health_stale_cron_is_unhealthy(monkeypatch, tmp_path):
 def test_health_missing_cron_log_is_unhealthy(monkeypatch, tmp_path):
     result = _run_heartbeat_no_notify(monkeypatch, tmp_path, cron_age_min=None)
     assert result.exit_code == 0
-    assert "no cron.log" in result.output
+    assert "no worker.log" in result.output
 
 
 def test_watchlist_counts_only_resolved(monkeypatch, tmp_path):

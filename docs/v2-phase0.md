@@ -121,5 +121,5 @@ owner at 30 alerts per cycle. Put `V2_DISCORD_WEBHOOK_URL` in `.env` (separate f
 - Deliveries are at-most-once: a crash between reserving rows and sending leaves them `pending`
   forever (they are never retried automatically).
 - Location detection is heuristic; ambiguous codes (IN, DE, CO, AR, OR, ME, HI, OK, NL, PE) are ignored.
-- `store.py` (v1 seen-store) is unused by `scan` and kept for reference; `--seed` replaces its role.
+- `store.py` (v1 seen-store) was removed in Phase 3; `--seed` replaces its role.
 - The v1 live project is unaffected; migrating data from `jobhunt.db` is not implemented.
