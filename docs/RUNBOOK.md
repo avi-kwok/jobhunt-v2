@@ -30,8 +30,13 @@ Both must hold the same key, or stored webhooks cannot be decrypted. Never commi
 3. Create the schema once, from the Mac, with the session pooler URL:
 
 ```
-DATABASE_URL='postgresql://postgres.PROJECT_REF:PASSWORD@POOLER_HOST:5432/postgres' .venv/bin/jobhunt db init
+read -s "PW?DB password: "    # zsh (Mac); the password stays out of history and this transcript
+export DATABASE_URL="postgresql://postgres.PROJECT_REF:${PW}@POOLER_HOST:5432/postgres"
+.venv/bin/jobhunt db init; unset PW DATABASE_URL
 ```
+
+Replace `PROJECT_REF` and `POOLER_HOST` with your values, and remove any `[YOUR-PASSWORD]` brackets
+Supabase shows: type only the password at the prompt. Percent-encode reserved characters first.
 
 Expect `Schema ready: backend=postgres, version=2`. Re-running is harmless. A free Supabase
 project pauses after 7 days of inactivity; the worker scans every 30 minutes, so it stays awake.
@@ -43,7 +48,8 @@ project pauses after 7 days of inactivity; the worker scans every 30 minutes, so
 2. Environment variables (Production):
    - `DATABASE_URL` = the transaction pooler URL (6543)
    - `JOBHUNT_SECRET_KEY` = the key from step 1
-   - `PUBLIC_BASE_URL` = `https://placeholder.vercel.app` (fixed in the next sub-step)
+   - `PUBLIC_BASE_URL` = `https://placeholder.vercel.app` (fixed in the next sub-step). Set its
+     type to **Config**, not Secret: Vercel rejects Secret for `PUBLIC_`-prefixed names.
 3. Deploy. Note the assigned `https://<name>.vercel.app` URL.
 4. Set `PUBLIC_BASE_URL` to that URL (no trailing slash) and **redeploy**. Env var changes only
    apply to new deployments.
@@ -68,7 +74,8 @@ curl -fsSL https://raw.githubusercontent.com/avi-kwok/jobhunt-v2/main/deploy/v2/
    Re-run it any time to update code; it never overwrites `.env`.
 3. Fill `~/jobhunt-v2/.env` (`nano`):
    - `DATABASE_URL` = the **session pooler** URL (5432)
-   - `JOBHUNT_SECRET_KEY` = the key from step 1
+   - `JOBHUNT_SECRET_KEY` = the key from step 1, **byte-identical** to Vercel's (no stray
+     newline or space). A mismatch aborts the scan; run `jobhunt doctor` (next step) first.
    - `ADMIN_WEBHOOK_URL` = a webhook for your private admin channel
 4. Check:
 
@@ -129,12 +136,17 @@ with a private manage link appears in that channel. Open it and press **Activate
 - **Rotate `JOBHUNT_SECRET_KEY`**: generate a new one, set it in Vercel (redeploy) and the worker
   `.env`. Stored webhooks are encrypted with the old key and become unreadable: the worker disables
   those subscribers, and every subscriber must resubscribe on the site. Only rotate if the key leaked.
+- **Scan exits 3 on every run with one subscriber**: a wrong key and a lone corrupt row look the
+  same, and delivery stays blocked. Run `.venv/bin/jobhunt doctor`; if the key is fine, run
+  `.venv/bin/jobhunt subscriber remove ID` for the bad row (see `subscriber list`).
 - **Remove a subscriber**: `.venv/bin/jobhunt subscriber remove ID`.
 - **Restore from backup** (`~/backups/jobhunt-<UTC stamp>.dump`, 7 newest kept). Use the session
   pooler URL, from a client whose major version is >= the server's:
 
 ```
-pg_restore --clean --if-exists --no-owner --no-privileges -d '<session pooler URL>' ~/backups/jobhunt-YYYYMMDD-HHMMSS.dump
+read -rsp 'DB password: ' PW; echo    # bash (VM); keeps the password out of history and `ps`
+PGPASSWORD="$PW" pg_restore --clean --if-exists --no-owner --no-privileges -d "postgresql://postgres.PROJECT_REF@POOLER_HOST:5432/postgres" ~/backups/jobhunt-YYYYMMDD-HHMMSS.dump
+unset PW
 .venv/bin/jobhunt doctor
 ```
 

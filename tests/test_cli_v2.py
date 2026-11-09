@@ -136,3 +136,60 @@ def test_scan_survives_bad_subscriber_row_and_leaks_no_url(tmp_path, monkeypatch
     assert db.delivery_status(conn, good, job.uid) == "sent"
     conn.close()
     assert len(sent) == 1
+
+
+def _scan_setup(tmp_path, monkeypatch, n=2):
+    from datetime import datetime, timedelta, timezone
+
+    from conftest import make_sub
+
+    from jobhunt.classify import Classification
+    from jobhunt.models import Job
+
+    path = str(tmp_path / "scan.db")
+    now = datetime.now(timezone.utc)
+    conn = db.connect(path)
+    ids = [make_sub(conn, i + 1, activated_at=now - timedelta(days=1)) for i in range(n)]
+    job = Job(source="x", company="Acme", external_id="1", title="SWE Intern",
+              url="https://x/1", location="Toronto, ON")
+    db.insert_new_postings(conn, [job], seen_at=db.to_iso(now))
+    db.upsert_tags(conn, job.uid, Classification(eligible=True, level="internship",
+                                                 countries=["CA"]))
+    conn.close()
+    monkeypatch.setattr(cli.pipeline, "ingest", lambda *a, **k: [])
+    real_deliver = cli.pipeline.deliver
+
+    class FakeNotifier:
+        def __init__(self, url):
+            pass
+
+        def send_embeds(self, embeds):
+            pass
+
+    monkeypatch.setattr(
+        cli.pipeline, "deliver",
+        lambda *a, **k: real_deliver(*a, **{**k, "notifier_factory": FakeNotifier}),
+    )
+    return path, ids
+
+
+def test_scan_wrong_worker_key_disables_nobody(tmp_path, monkeypatch):
+    import base64
+
+    path, ids = _scan_setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("JOBHUNT_SECRET_KEY", base64.urlsafe_b64encode(b"\x07" * 32).decode())
+    r = runner.invoke(cli.app, ["scan", "--db", path, "--force", "--no-jitter"])
+    assert r.exit_code != 0
+    assert r.exit_code == 3 and "No subscriber disabled" in r.output
+    conn = db.connect(path)
+    assert [db.get_subscriber(conn, i).status for i in ids] == ["active", "active"]
+    conn.close()
+
+
+def test_scan_error_text_with_markup_does_not_crash(tmp_path, monkeypatch):
+    path, _ = _scan_setup(tmp_path, monkeypatch, n=1)
+    monkeypatch.setattr(cli.pipeline, "ingest",
+                        lambda cfg, conn, errors, resolved: errors.append("board boom [/x] [red]") or [])
+    r = runner.invoke(cli.app, ["scan", "--db", path, "--force", "--no-jitter"])
+    assert r.exit_code == 0, r.output
+    assert "[/x]" in r.output

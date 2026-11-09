@@ -115,6 +115,7 @@ ensure_env_file() {
   log ".env"
   cd "$JOBHUNT_HOME"
   mkdir -p logs "$HOME/backups"
+  chmod 700 logs "$HOME/backups"  # private even if they already existed
   if [ -e .env ]; then
     chmod 600 .env
     echo ".env exists: left untouched (permissions set to 600)"

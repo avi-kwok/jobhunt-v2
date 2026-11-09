@@ -11,6 +11,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from . import adapters  # noqa: F401 - registers adapters
@@ -167,10 +168,10 @@ def discover(
 
     result = disco.resolve(name, url=url)
     if result is None:
-        console.print(f"[red]Could not resolve {name}[/]. Try passing --url <careers URL>.")
+        console.print(f"[red]Could not resolve {escape(name)}[/]. Try passing --url <careers URL>.")
         raise typer.Exit(1)
     result.priority = cfg.company_priority.get(name, 4)
-    console.print(f"[green]{name}[/] -> {result.model_dump(exclude_none=True)}")
+    console.print(f"[green]{escape(name)}[/] -> {escape(str(result.model_dump(exclude_none=True)))}")
     console.print("Add this to companies.resolved.yaml, or re-run `discover --all`.")
 
 
@@ -245,7 +246,7 @@ def scan(
             for note in security.preflight():
                 console.print(f"[dim]security: {note}[/]")
         except security.SecurityError as exc:
-            console.print(f"[red]Security check failed:[/] {exc}")
+            console.print(f"[red]Security check failed:[/] {escape(str(exc))}")
             raise typer.Exit(2)
 
     if not seed and not no_notify:
@@ -285,6 +286,7 @@ def scan(
             if not subs:
                 console.print("[yellow]No active subscribers.[/]")
             plan = pipeline.match_subscribers(cfg, conn, subs)
+            undecryptable: list[int] = []  # judged after the loop: bad row or wrong key?
             for sub in subs:
                 try:
                     res = pipeline.deliver(
@@ -293,7 +295,11 @@ def scan(
                 except Exception as exc:  # noqa: BLE001 - one bad row must not starve the rest
                     try:
                         conn.rollback()
-                        if isinstance(exc, (crypto.CryptoError, webhooks.WebhookError)):
+                        if isinstance(exc, crypto.CryptoError):
+                            undecryptable.append(sub.id)
+                            log(f"subscriber {sub.id}: stored webhook undecryptable")
+                            continue
+                        if isinstance(exc, webhooks.WebhookError):
                             v2db.disable_subscriber(
                                 conn, sub.id, "stored webhook undecryptable or invalid"
                             )
@@ -316,6 +322,18 @@ def scan(
                         f"[dim]Subscriber {sub.id}: {res.skipped_over_cap} more queued "
                         "(per-cycle cap).[/]"
                     )
+            if undecryptable:
+                # Wrong worker key fails EVERY row; a corrupt row fails alone. Only disable
+                # rows if some other subscriber still decrypts under this key.
+                if not any(_decrypts(s) for s in subs if s.id not in undecryptable):
+                    console.print(
+                        "[red]Cannot decrypt any subscriber webhook: JOBHUNT_SECRET_KEY on "
+                        "this worker does not match the web app's. No subscriber disabled.[/]"
+                    )
+                    raise typer.Exit(3)
+                for sid in undecryptable:
+                    v2db.disable_subscriber(conn, sid, "stored webhook undecryptable or invalid")
+                    totals["disabled"] += 1
         pruned = v2db.prune_postings(conn)
         if pruned:
             console.print(f"[dim]Pruned {pruned} posting(s) older than {v2db.RETENTION_DAYS} days.[/]")
@@ -340,7 +358,7 @@ def scan(
     if errors:
         console.print(f"\n[yellow]{len(errors)} company error(s):[/]")
         for e in errors:
-            console.print(f"  [red]•[/] {security.redact(e)}", markup=True)
+            console.print(f"  [red]•[/] {escape(security.redact(e))}", markup=True)
 
 
 # ---- list-matches ---------------------------------------------------------
@@ -535,7 +553,7 @@ def subscriber_add(
         h = crypto.webhook_hash(hook.url)
     except (webhooks.WebhookError, crypto.CryptoError) as exc:
         console.print(f"[red]{exc}[/]" if isinstance(exc, crypto.CryptoError)
-                      else f"[red]${webhook_env}: {exc}[/]")
+                      else f"[red]${escape(webhook_env)}: {escape(str(exc))}[/]")
         raise typer.Exit(2)
     conn = v2db.connect(db_path)
     try:
@@ -611,7 +629,7 @@ def tailor(
         for note in security.preflight():
             console.print(f"[dim]security: {note}[/]")
     except security.SecurityError as exc:
-        console.print(f"[red]Security check failed:[/] {exc}")
+        console.print(f"[red]Security check failed:[/] {escape(str(exc))}")
         raise typer.Exit(2)
     if security.get_api_key(required=False) is None:
         console.print(
@@ -631,7 +649,7 @@ def tailor(
                 max_tokens=cfg.budget.sonnet_max_tokens,
             )
         except BudgetExceeded as exc:
-            console.print(f"[red]Refused to spend:[/] {exc}")
+            console.print(f"[red]Refused to spend:[/] {escape(str(exc))}")
             raise typer.Exit(2)
         spend = guard.status()
 
@@ -819,10 +837,18 @@ def heartbeat(
         DiscordNotifier(admin.url).send_status(title, fields, color)
         console.print(f"[green]Posted heartbeat to Discord[/] ({status_text}).")
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[yellow]Heartbeat not posted:[/] {security.redact(str(exc))}")
+        console.print(f"[yellow]Heartbeat not posted:[/] {escape(security.redact(str(exc)))}")
 
 
 # ---- helpers --------------------------------------------------------------
+
+def _decrypts(sub) -> bool:
+    try:
+        crypto.decrypt_url(sub.webhook_enc)
+        return True
+    except crypto.CryptoError:
+        return False
+
 
 def _parse_since(since: str | None) -> datetime | None:
     if not since:

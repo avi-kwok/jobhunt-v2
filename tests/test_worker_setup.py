@@ -77,7 +77,7 @@ def test_backup_keeps_seven_newest(tmp_path):
     dest.mkdir()
     # Stand-ins: a "python" that prints a URL and a "pg_dump" that writes its --file target.
     py = repo / ".venv" / "bin" / "python"
-    py.write_text('#!/bin/sh\necho postgresql://u:p@h:5432/db\n')
+    py.write_text('#!/bin/sh\necho postgresql://u@h:5432/db; echo Pp\n')
     dump = bindir / "pg_dump"
     dump.write_text('#!/bin/bash\nfor a in "$@"; do case $a in --file=*) echo data > "${a#--file=}";; esac; done\n')
     for f in (py, dump):
@@ -102,7 +102,7 @@ def test_backup_failure_leaves_no_partial_file(tmp_path):
     (repo / ".venv" / "bin").mkdir(parents=True)
     bindir.mkdir()
     py = repo / ".venv" / "bin" / "python"
-    py.write_text('#!/bin/sh\necho postgresql://u:p@h:5432/db\n')
+    py.write_text('#!/bin/sh\necho postgresql://u@h:5432/db; echo Pp\n')
     dump = bindir / "pg_dump"
     dump.write_text("#!/bin/bash\nexit 1\n")
     py.chmod(0o755)
@@ -112,3 +112,41 @@ def test_backup_failure_leaves_no_partial_file(tmp_path):
                        capture_output=True, text=True)
     assert r.returncode == 1
     assert not list(dest.glob("*"))
+
+
+def test_backup_password_not_on_argv(tmp_path):
+    import sys
+    repo, bindir, dest = tmp_path / "repo", tmp_path / "bin", tmp_path / "backups"
+    (repo / ".venv" / "bin").mkdir(parents=True)
+    bindir.mkdir()
+    py = repo / ".venv" / "bin" / "python"
+    py.write_text(f'#!/bin/sh\nexec {sys.executable} "$@"\n')
+    (repo / ".env").write_text("DATABASE_URL='postgresql://u.ref:p%40ss%3Aw%2Frd@h:5432/db?sslmode=require'\n")
+    rec = tmp_path / "rec"
+    dump = bindir / "pg_dump"
+    dump.write_text(f'#!/bin/bash\necho "$@" > {rec}\necho "$PGPASSWORD" >> {rec}\n'
+                    'for a in "$@"; do case $a in --file=*) echo data > "${a#--file=}";; esac; done\n')
+    for f in (py, dump):
+        f.chmod(0o755)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "BACKUP_DIR": str(dest)}
+    r = subprocess.run(["bash", str(DEPLOY / "backup.sh")], cwd=repo, env=env,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    argv, pw = rec.read_text().splitlines()
+    assert pw == "p@ss:w/rd"
+    assert "p%40ss" not in argv and "w%2Frd" not in argv and "p@ss" not in argv
+    assert "postgresql://u.ref@h:5432/db?sslmode=require" in argv
+
+
+def test_setup_dirs_are_private(tmp_path):
+    home = tmp_path / "home"
+    (home / "backups").mkdir(parents=True)
+    (home / "backups").chmod(0o755)  # pre-existing, loose
+    jh = tmp_path / "jh"
+    jh.mkdir()
+    r = subprocess.run(
+        ["bash", "-c", f'source "{SETUP}"; JOBHUNT_HOME="{jh}"; ensure_env_file'],
+        env={**os.environ, "HOME": str(home)}, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    for d in (jh / "logs", home / "backups"):
+        assert d.stat().st_mode & 0o777 == 0o700

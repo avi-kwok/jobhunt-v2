@@ -9,8 +9,22 @@ KEEP=7
 mkdir -p "$DEST"
 
 # Read DATABASE_URL from .env without sourcing it (values may contain shell metacharacters).
-URL="$(.venv/bin/python -c "from dotenv import dotenv_values; print(dotenv_values('.env').get('DATABASE_URL') or '')")"
+# Prints the URL with the password removed, then "P" + the decoded password: the password goes to
+# pg_dump via PGPASSWORD (environment), never argv, where `ps` would show it to other local users.
+PARTS="$(.venv/bin/python -c "
+from urllib.parse import unquote, urlsplit
+from dotenv import dotenv_values
+url = dotenv_values('.env').get('DATABASE_URL') or ''
+if url:
+    u = urlsplit(url)
+    userinfo, _, host = u.netloc.rpartition('@')
+    print(u._replace(netloc=(userinfo.partition(':')[0] + '@' if userinfo else '') + host).geturl())
+    print('P' + unquote(u.password or ''))
+")"
+URL="${PARTS%%$'\n'*}"
 [ -n "$URL" ] || { echo "$(date -u +%FT%TZ) DATABASE_URL missing in .env" >&2; exit 1; }
+PGPASSWORD="${PARTS#*$'\n'P}"
+export PGPASSWORD
 
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 OUT="$DEST/jobhunt-$STAMP.dump"

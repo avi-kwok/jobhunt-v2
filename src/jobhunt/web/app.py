@@ -26,7 +26,8 @@ SUBSCRIBE_PER_IP_PER_HOUR = 10
 MESSAGES_PER_WEBHOOK_PER_DAY = 3
 DISCORD_TIMEOUT = 5.0
 SECURITY_HEADERS = {
-    "Content-Security-Policy": "default-src 'self'",
+    "Content-Security-Policy": "default-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",

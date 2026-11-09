@@ -202,7 +202,9 @@ def test_security_headers(client, discord):
     for path in ["/", "/privacy", "/terms", "/healthz", f"/manage?t={t}", "/manage?t=bad",
                  "/nope", "/static/style.css"]:
         r = client.get(path)
-        assert r.headers["content-security-policy"] == "default-src 'self'", path
+        assert r.headers["content-security-policy"] == (
+            "default-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"), path
+        assert r.headers["strict-transport-security"] == "max-age=63072000; includeSubDomains"
         assert r.headers["x-frame-options"] == "DENY"
         assert r.headers["referrer-policy"] == "no-referrer"
         assert r.headers["x-content-type-options"] == "nosniff"

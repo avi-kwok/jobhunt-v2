@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import timezone
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -24,6 +26,34 @@ LOCATION_LABELS = {
     5: "Other",
 }
 MAX_EMBEDS_PER_MESSAGE = 10
+# Discord caps a message at 6000 embed chars; 10 embeds -> keep each under ~600.
+# Budget: title 120 + company 100 + location 100 + posted 60 + type 100 + names ~30.
+TITLE_MAX, COMPANY_MAX, LOCATION_MAX, POSTED_MAX, TYPE_MAX = 120, 100, 100, 60, 100
+_MD_SPECIAL = re.compile(r"([\\*_~`|>\[\]()#<])")
+
+
+def _clip(text: str, limit: int) -> str:
+    text = str(text)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _md_escape(text: str) -> str:
+    """Backslash-escape Discord markdown so board text can't render links/formatting."""
+    return _MD_SPECIAL.sub(r"\\\1", str(text))
+
+
+def _safe_url(url: str | None) -> str | None:
+    """Only absolute https URLs with a host (Discord 400s on the rest); else None."""
+    try:
+        parts = urlsplit((url or "").strip())
+    except ValueError:
+        return None
+    u = url.strip()
+    if parts.scheme != "https" or not parts.hostname or len(u) > 2000:
+        return None
+    if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in u):
+        return None
+    return u
 
 
 class DiscordHTTPError(RuntimeError):
@@ -59,21 +89,30 @@ def alert_embed(
     prio_label, color = PRIORITY_LABELS.get(company_priority, PRIORITY_LABELS[4])
     why = " · ".join([x for x in [level, *categories] if x]) or "-"
     embed = {
-        "title": job.title[:250],
-        "url": job.url,
+        "title": _clip(job.title, TITLE_MAX),
         "color": color,
         "fields": [
-            {"name": "Company", "value": f"{job.company} ({prio_label})", "inline": True},
             {
-                "name": "Location",
-                "value": f"{job.location or 'unspecified'} · "
-                f"{LOCATION_LABELS.get(location_tier, 'Other')}",
+                "name": "Company",
+                "value": f"{_clip(_md_escape(job.company), COMPANY_MAX)} ({prio_label})",
                 "inline": True,
             },
-            {"name": "Posted", "value": _posted_display(job), "inline": True},
-            {"name": "Type", "value": why, "inline": False},
+            {
+                "name": "Location",
+                "value": _clip(
+                    f"{_md_escape(job.location or 'unspecified')} · "
+                    f"{LOCATION_LABELS.get(location_tier, 'Other')}",
+                    LOCATION_MAX,
+                ),
+                "inline": True,
+            },
+            {"name": "Posted", "value": _clip(_posted_display(job), POSTED_MAX), "inline": True},
+            {"name": "Type", "value": _clip(why, TYPE_MAX), "inline": False},
         ],
     }
+    url = _safe_url(job.url)
+    if url:
+        embed["url"] = url
     if job.posted_at is not None:
         posted = job.posted_at
         if posted.tzinfo is None:
@@ -98,7 +137,7 @@ class DiscordNotifier:
             raise RuntimeError("webhook URL is not set")  # no secret to leak
         client = self._client or httpx.Client(timeout=20.0)
         try:
-            resp = client.post(self.webhook_url, json={"embeds": embeds})
+            resp = client.post(self.webhook_url, json={"embeds": embeds, "allowed_mentions": {"parse": []}})
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as exc:
