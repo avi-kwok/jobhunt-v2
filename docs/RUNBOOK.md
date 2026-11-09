@@ -58,12 +58,41 @@ project pauses after 7 days of inactivity; the worker scans every 30 minutes, so
 ## 4. Oracle (worker)
 
 1. Create a **new** Always Free instance: shape VM.Standard.A1.Flex, 1 OCPU, 6 GB RAM, image
-   Ubuntu 24.04 (or 22.04), region near Toronto, a public IP, your SSH public key. Leave the
-   default security list: only inbound SSH (port 22). Open no other ports; the worker only makes
-   outbound requests.
+   Ubuntu 24.04 (or 22.04), region near Toronto, a public IP. Keep it isolated from any other
+   instance (e.g. v1's):
+   - Networking: **Create new virtual cloud network** and **Create new public subnet** (Always
+     Free allows 2 VCNs). Sharing an existing VCN shares its security list, so tightening SSH
+     here would change the other instance too.
+   - SSH keys: **Generate a key pair for me**, download the private key, then on the Mac:
+     `mv ~/Downloads/ssh-key-YYYY-MM-DD.key ~/.ssh/jobhunt-v2.key && chmod 600 ~/.ssh/jobhunt-v2.key`.
+     Add a passphrase (`ssh-keygen -p -f ~/.ssh/jobhunt-v2.key`) and store it in the Keychain
+     (`ssh-add --apple-use-keychain ~/.ssh/jobhunt-v2.key`). Use a new key, not another box's.
+
    If creation fails with **Out of host capacity**, retry later (different hours, or another
    availability domain). It is a free-tier capacity limit, not a config error.
-2. `ssh ubuntu@<public-ip>`, then:
+2. Harden before first login (the VM holds DATABASE_URL and JOBHUNT_SECRET_KEY, which decrypt
+   every subscriber's webhook):
+   - **Instance metadata service: Version 2 only** (Details or Management tab, or Actions → Edit →
+     advanced options). Blocks a redirect-based SSRF from reaching the metadata endpoint.
+   - **SSH from your IP only:** Networking → subnet → Security → the new VCN's security list →
+     edit the port 22 ingress rule's source from `0.0.0.0/0` to `<your IP>/32` (`curl ifconfig.me`).
+     Add no other ingress rules; the worker only makes outbound requests. If your IP changes
+     (new network), update this rule from the console.
+   - **Verify the host key on first connect** (matters on untrusted networks): Actions → Console
+     history → Capture, find `BEGIN SSH HOST KEY FINGERPRINTS`, and type `yes` at the SSH prompt
+     only if its `SHA256:` fingerprint is in that list.
+3. `ssh -i ~/.ssh/jobhunt-v2.key ubuntu@<public-ip>`, then confirm password logins are off
+   (`sudo sshd -T | grep -i passwordauthentication` → `passwordauthentication no`), enable
+   automatic security updates and reboots, and keep Ubuntu's default iptables rules (do not flush
+   them or run anything that listens on a port):
+
+```
+sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+echo 'Unattended-Upgrade::Automatic-Reboot "true";' | sudo tee /etc/apt/apt.conf.d/52jobhunt-reboot
+```
+
+   Then run the setup script:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/avi-kwok/jobhunt-v2/main/deploy/v2/worker-setup.sh | bash
@@ -72,12 +101,12 @@ curl -fsSL https://raw.githubusercontent.com/avi-kwok/jobhunt-v2/main/deploy/v2/
    It installs Python 3.11+, the PGDG `postgresql-client`, clones the repo to `~/jobhunt-v2`,
    builds `.venv`, creates `~/jobhunt-v2/.env` (mode 600) if missing, and installs the crontab.
    Re-run it any time to update code; it never overwrites `.env`.
-3. Fill `~/jobhunt-v2/.env` (`nano`):
+4. Fill `~/jobhunt-v2/.env` (`nano`):
    - `DATABASE_URL` = the **session pooler** URL (5432)
    - `JOBHUNT_SECRET_KEY` = the key from step 1, **byte-identical** to Vercel's (no stray
      newline or space). A mismatch aborts the scan; run `jobhunt doctor` (next step) first.
    - `ADMIN_WEBHOOK_URL` = a webhook for your private admin channel
-4. Check:
+5. Check:
 
 ```
 cd ~/jobhunt-v2 && .venv/bin/jobhunt doctor
@@ -86,7 +115,7 @@ cd ~/jobhunt-v2 && .venv/bin/jobhunt doctor
    All rows must say PASS (exit code 0). The `company endpoints` row confirms the tracked
    `companies.resolved.yaml` (ATS slugs for every company) came down with the clone; without it
    the scan fetches nothing.
-5. Make pg_dump compatible. The client major version must be >= the server's:
+6. Make pg_dump compatible. The client major version must be >= the server's:
 
 ```
 psql "$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" -c 'SHOW server_version;'
@@ -94,13 +123,13 @@ pg_dump --version
 ```
 
    If the server major is higher, re-run the setup script with `PG_CLIENT_VERSION=<server major>`.
-6. Record today's postings without alerting anyone (so no backlog is sent to subscribers):
+7. Record today's postings without alerting anyone (so no backlog is sent to subscribers):
 
 ```
 .venv/bin/jobhunt scan --seed --no-jitter
 ```
 
-7. Confirm cron: `crontab -l` shows a block between `# BEGIN jobhunt-v2` and `# END jobhunt-v2`:
+8. Confirm cron: `crontab -l` shows a block between `# BEGIN jobhunt-v2` and `# END jobhunt-v2`:
    scan every 30 min, heartbeat daily 16:00 UTC, backup daily 09:00 UTC.
    After 30 minutes `tail ~/jobhunt-v2/logs/worker.log` shows a scan.
 
