@@ -10,7 +10,6 @@ CRITERIA = Criteria(
     role_terms=["software engineer", "swe", "backend"],
     exclude_terms=["senior", "new grad", "manager"],
     location_match_required=True,
-    use_llm_filter=False,
 )
 TIERS = {
     "local": ["vancouver", "toronto"],
@@ -149,3 +148,84 @@ def test_dedupe_by_uid_keeps_first():
     out = dedupe_by_uid([a, a_dup, b])
     assert [j.external_id for j in out] == ["R1", "R2"]
     assert out[0].url == "u1"  # first occurrence kept
+
+
+# ---- exclude_exempt_terms (PM-adjacent roles) ------------------------------
+
+PM_CRITERIA = Criteria(
+    internship_terms=["intern", "co-op", "coop"],
+    role_terms=[
+        "software engineer", "swe", "backend",
+        "product manager", "product marketing", "technical program", "program manager",
+    ],
+    exclude_terms=["senior", "new grad", "manager", "director"],
+    exclude_exempt_terms=["product manager", "product marketing manager", "program manager"],
+    location_match_required=False,
+)
+
+
+def test_pm_intern_passes_via_exempt_term():
+    for title in (
+        "Product Manager Intern",
+        "Associate Product Manager Intern - Summer 2027",
+        "Technical Program Manager Co-op",
+        "Product Marketing Manager Intern",
+    ):
+        passed, _ = prefilter(_job(title), PM_CRITERIA, TIERS)
+        assert passed, title
+
+
+def test_exempt_term_does_not_shield_other_excludes():
+    # "product manager" is stripped, but "senior" still rejects it.
+    passed, _ = prefilter(_job("Senior Product Manager Intern"), PM_CRITERIA, TIERS)
+    assert not passed
+    passed, _ = prefilter(_job("Senior Product Manager"), PM_CRITERIA, TIERS)
+    assert not passed
+
+
+def test_engineering_manager_still_excluded():
+    # "Engineering Manager ... Program" contains no exempt phrase, so "manager"
+    # survives stripping and the title is rejected.
+    passed, _ = prefilter(
+        _job("Engineering Manager Intern Program - Software Engineer"), PM_CRITERIA, TIERS
+    )
+    assert not passed
+
+
+def test_swe_cases_unchanged_with_exempt_terms():
+    assert prefilter(_job("Software Engineer Intern"), PM_CRITERIA, TIERS)[0]
+    assert not prefilter(_job("Senior Software Engineer Intern"), PM_CRITERIA, TIERS)[0]
+    assert not prefilter(_job("Software Engineer, New Grad"), PM_CRITERIA, TIERS)[0]
+    assert not prefilter(_job("Software Engineering Manager Intern"), PM_CRITERIA, TIERS)[0]
+
+
+def test_no_exempt_terms_keeps_manager_excluded():
+    # The original CRITERIA has no exempt list -> "manager" rejects PM titles.
+    crit = CRITERIA.model_copy(update={"role_terms": ["product manager"]})
+    passed, _ = prefilter(_job("Product Manager Intern", "Vancouver"), crit, TIERS)
+    assert not passed
+
+
+def test_real_config_drops_pm_and_keeps_swe():
+    from pathlib import Path
+
+    from jobhunt.config import load_config
+
+    cfg = load_config(Path("config.yaml"), resolved_path=Path("/nonexistent.yaml"))
+    crit = cfg.criteria.model_copy(update={"location_match_required": False})
+    tiers = cfg.location_tiers
+    import re
+
+    assert not any(
+        re.search(r"\b(product|program|tpm)\b", t) for t in crit.role_terms
+    )
+    assert prefilter(_job("Software Engineer Intern"), crit, tiers)[0]
+    for title in (
+        "Product Manager Intern",
+        "Technical Program Manager Intern",
+        "Senior Product Manager",
+        "Engineering Manager Intern Program",
+        "UX Design Intern",
+        "Business Analyst Intern",
+    ):
+        assert not prefilter(_job(title), crit, tiers)[0], title

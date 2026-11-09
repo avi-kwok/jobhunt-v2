@@ -29,6 +29,14 @@ LOCATION_LABELS = {
 MAX_EMBEDS_PER_MESSAGE = 10
 
 
+class DiscordHTTPError(RuntimeError):
+    """A Discord webhook call failed with an HTTP status (message is redacted)."""
+
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 @runtime_checkable
 class Notifier(Protocol):
     def send(self, matches: list[tuple[Job, MatchResult]]) -> None: ...
@@ -82,8 +90,42 @@ def _embed(job: Job, match: MatchResult) -> dict:
     return embed
 
 
+def alert_embed(
+    job: Job, company_priority: int, location_tier: int, level: str | None, categories: list[str]
+) -> dict:
+    """v2 alert embed: no score / LLM reason, just the deterministic tags."""
+    prio_label, color = PRIORITY_LABELS.get(company_priority, PRIORITY_LABELS[4])
+    why = " · ".join([x for x in [level, *categories] if x]) or "-"
+    embed = {
+        "title": job.title[:250],
+        "url": job.url,
+        "color": color,
+        "fields": [
+            {"name": "Company", "value": f"{job.company} ({prio_label})", "inline": True},
+            {
+                "name": "Location",
+                "value": f"{job.location or 'unspecified'} · "
+                f"{LOCATION_LABELS.get(location_tier, 'Other')}",
+                "inline": True,
+            },
+            {"name": "Posted", "value": _posted_display(job), "inline": True},
+            {"name": "Type", "value": why, "inline": False},
+        ],
+    }
+    if job.posted_at is not None:
+        posted = job.posted_at
+        if posted.tzinfo is None:
+            posted = posted.replace(tzinfo=timezone.utc)
+        embed["timestamp"] = posted.isoformat()
+    return embed
+
+
 class DiscordNotifier:
-    """Posts matches as rich embeds to a Discord webhook, best-sorted and batched."""
+    """Posts matches as rich embeds to a Discord webhook, best-sorted and batched.
+
+    Pass `webhook_url` explicitly for per-user delivery (v2). With no argument it
+    falls back to the DISCORD_WEBHOOK_URL env var (v1 heartbeat behaviour).
+    """
 
     def __init__(self, webhook_url: str | None = None, client: httpx.Client | None = None):
         self.webhook_url = webhook_url or os.environ.get("DISCORD_WEBHOOK_URL")
@@ -101,7 +143,7 @@ class DiscordNotifier:
                 # httpx puts the full request URL in the message, and the
                 # webhook URL is itself a credential. Re-raise redacted so the
                 # secret can never reach stdout / logs / a crash report.
-                raise RuntimeError(redact(str(exc))) from None
+                raise DiscordHTTPError(redact(str(exc)), resp.status_code) from None
         except httpx.RequestError as exc:
             raise RuntimeError(redact(str(exc))) from None
         finally:
@@ -113,6 +155,11 @@ class DiscordNotifier:
             return
         ordered = sorted(matches, key=lambda pair: composite_key(pair[1]))
         embeds = [_embed(job, match) for job, match in ordered]
+        for i in range(0, len(embeds), MAX_EMBEDS_PER_MESSAGE):
+            self._post(embeds[i : i + MAX_EMBEDS_PER_MESSAGE])
+
+    def send_embeds(self, embeds: list[dict]) -> None:
+        """Post pre-built embeds, at most MAX_EMBEDS_PER_MESSAGE per HTTP call."""
         for i in range(0, len(embeds), MAX_EMBEDS_PER_MESSAGE):
             self._post(embeds[i : i + MAX_EMBEDS_PER_MESSAGE])
 

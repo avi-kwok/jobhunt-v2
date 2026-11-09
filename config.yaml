@@ -8,17 +8,20 @@
 # ---------------------------------------------------------------------------
 
 criteria:
-  # Distilled from the full title list into token matching (substring, case-
-  # insensitive). This is deliberately more robust than exact-title matching:
-  # it also catches "Software Engineering Intern – Summer 2026", etc.
+  # Title token matching (case-insensitive, word-boundary; see classify.py).
+  # More robust than exact-title matching: also catches
+  # "Software Engineering Intern – Summer 2026", etc.
 
   # TITLE must contain at least one of these (it's an internship/co-op/student role):
   # "student"/"campus" added for Canadian bank & co-op wording (e.g. RBC's
-  # "Fall Student Opportunities Technology"); role_terms + exclude_terms + the LLM
-  # filter keep precision high.
+  # "Fall Student Opportunities Technology"). v2 matches these as WHOLE WORDS
+  # (classify.py), so "Internal"/"International"/"Cooperative" never count.
   internship_terms: [intern, internship, "co-op", coop, "co op", student, campus]
 
-  # TITLE must contain at least one of these (it's a SWE/dev/infra/security role):
+  # TITLE must contain at least one of these (a SWE/dev/infra/security role).
+  # v2: the PM-adjacent group (product manager, APM, TPM, product owner, product
+  # marketing, program manager, ...) was REMOVED - PM is out of launch scope.
+  # classify.py adds mobile/ios/android/embedded/firmware/ML-engineer terms in code.
   role_terms:
     - software engineer
     - software developer
@@ -68,7 +71,7 @@ criteria:
     - build engineer
     - technology analyst   # bank early-career dev-track title (e.g. TD/RBC)
 
-  # TITLE containing any of these is rejected (keeps it internship-level SWE):
+  # TITLE containing any of these is rejected (keeps it internship-level):
   exclude_terms:
     - senior
     - staff
@@ -83,9 +86,9 @@ criteria:
     - mba
     - full-time        # tune: remove if it drops valid "full-time internship" posts
 
-  # Cheap Haiku relevance check on survivors of the above (recommended: keeps
-  # borderline titles honest and reads the description for term length, etc.).
-  use_llm_filter: true
+  # Phrases stripped from the title BEFORE exclude_terms is checked. v2: empty
+  # (it only existed so PM-track titles survived the "manager" exclude).
+  exclude_exempt_terms: []
 
   # FRESHNESS. Only notify on postings whose own timestamp is within this many
   # minutes. 60 comfortably covers the scan cadence (every 15-30 min) so a job
@@ -488,3 +491,100 @@ companies:
   - name: Zoom
   - name: ZoomInfo
   - name: Zscaler
+
+  # --- Canadian expansion (2026-10-19): companies with Canadian SWE intern/co-op
+  # programs not already above. Grouped by region for readability.
+  # Vancouver / BC
+  - name: Absolute Software
+  - name: AbCellera
+  - name: Alida
+  - name: Arc'teryx
+  - name: Copperleaf
+  - name: D-Wave
+  - name: Dapper Labs
+  - name: Diligent
+  - name: FISPAN
+  - name: Klue
+  - name: Lululemon
+  - name: Mogo
+  - name: Procurify
+  - name: Relic Entertainment
+  - name: Sanctuary AI
+  - name: Semios
+  - name: Thinkific
+  - name: Trulioo
+  - name: Unbounce
+  - name: Visier
+  # Toronto / GTA
+  - name: Ada
+  - name: Borealis AI
+  - name: Borrowell
+  - name: Canadian Tire
+  - name: Clearco
+  - name: Coinsquare
+  - name: Ecobee
+  - name: Float
+  - name: Ideogram
+  - name: Interac
+  - name: KOHO
+  - name: League
+  - name: Loblaw Digital
+  - name: Nesto
+  - name: PolicyMe
+  - name: Rose Rocket
+  - name: Super.com
+  - name: Tailscale
+  - name: Top Hat
+  - name: Untether AI
+  - name: Validere
+  - name: Vena Solutions
+  - name: Waabi
+  - name: Wattpad
+  - name: Wave Financial
+  - name: Xanadu
+  # Waterloo / Kitchener
+  - name: ApplyBoard
+  - name: Auvik
+  - name: Avidbots
+  - name: Axonify
+  - name: Clearpath Robotics
+  - name: Descartes Systems
+  - name: eSentire
+  - name: Miovision
+  - name: TextNow
+  - name: Vidyard
+  # Ottawa
+  - name: Assent
+  - name: Field Effect
+  - name: Fullscript
+  - name: MindBridge
+  - name: Mitel
+  - name: Ross Video
+  - name: Solace
+  # Montreal / Quebec
+  - name: AppDirect
+  - name: Behaviour Interactive
+  - name: Botpress
+  - name: CAE
+  - name: Coveo
+  - name: Desjardins
+  - name: Dialogue
+  - name: Flinks
+  - name: Genetec
+  - name: Mistplay
+  - name: Plusgrade
+  - name: Shakepay
+  - name: Ubisoft
+  - name: Vention
+  # Prairies
+  - name: AltaML
+  - name: Arcurve
+  - name: Drivewyze
+  - name: Helcim
+  - name: Pason Systems
+  - name: Showpass
+  - name: Symend
+  # Atlantic
+  - name: CoLab Software
+  - name: Kinduct
+  - name: Proposify

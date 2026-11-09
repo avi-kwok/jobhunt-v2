@@ -99,7 +99,7 @@ Company priority first, then location, then match score. Companies are also *fet
 | Tests | pytest + respx | adapters tested against mocked HTTP, no network |
 | Deploy | cron on Ubuntu | plus an optional GitHub Actions workflow |
 
-**Sources.** Five adapters behind one `Adapter` ABC and a registry, so adding an ATS means adding one file: Greenhouse, Lever, and Ashby (single-request JSON boards), Workday (paginated POST search, unions several role×internship queries at concurrency 2), and Amazon's own `amazon.jobs` API. Playwright is an optional extra and a genuine last resort.
+**Sources.** Five adapters behind one `Adapter` ABC and a registry, so adding an ATS means adding one file: Greenhouse, Lever, and Ashby (single-request JSON boards), Workday (paginated POST search: auto-detects each board's internship facet and fetches intern postings with one facet-filtered query, falling back to role×internship phrase queries at concurrency 2; `workday_facets: false` in `companies.resolved.yaml` forces the fallback), and Amazon's own `amazon.jobs` API. Playwright is an optional extra and a genuine last resort.
 
 ## Guardrails
 
@@ -224,7 +224,7 @@ deploy/          setup.sh · DEPLOY.md · MAINTENANCE.md
 ## Limitations
 
 - **Four companies can't be linked.** Apple's ToS forbids automated access; Microsoft's Eightfold endpoint needs OAuth; Google has had no public API since 2021 and is bot-protected; Meta uses GraphQL with bot detection. Use their native email alerts instead.
-- **Workday boards are slow** — a loose search returns 1–2k rows per board, so a full scan takes ~15–20 minutes. Per-tenant facets would be the real fix.
+- **Workday facets depend on how each employer tags postings.** Boards are fetched via their auto-detected internship facet (seconds per board instead of minutes), but a board that mis-tags some interns (e.g. Manulife's Asia co-ops) needs `workday_facets: false` to use the slower phrase-search path.
 - **Known bug:** `load_dotenv()` resolves `.env` by walking up from the installed console script, while `security.audit()` checks the working-directory `.env`. The two can disagree about which file is in use, so `security-check` can report a key as present while saying `.env` wasn't found.
 
 ## License

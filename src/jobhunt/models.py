@@ -50,6 +50,10 @@ class CompanyConfig(BaseModel):
     tenant: str | None = None  # workday
     wd: str | None = None  # workday host, e.g. "wd5"
     site: str | None = None  # workday site
+    # workday: None/True = auto-detect an internship facet and fetch with one
+    # facet-filtered search; False = force the searchText phrase-search path
+    # (escape hatch for boards whose intern facet misses eligible postings).
+    workday_facets: bool | None = None
 
 
 class Criteria(BaseModel):
@@ -58,8 +62,11 @@ class Criteria(BaseModel):
     internship_terms: list[str]  # title must contain >=1
     role_terms: list[str]  # title must contain >=1
     exclude_terms: list[str] = []  # title must contain none
+    # Phrases removed from the title before exclude_terms is checked, so e.g.
+    # "product manager" doesn't trip the "manager" exclude ("Product Manager
+    # Intern" passes; "Senior Product Manager" still fails on "senior").
+    exclude_exempt_terms: list[str] = []
     location_match_required: bool = True
-    use_llm_filter: bool = True
     # Only notify on postings whose own timestamp is within this many minutes.
     # None/0 disables the timestamp filter (rely on the seen-store alone).
     # Sources without a reliable timestamp (Workday; Greenhouse gives edit-time)

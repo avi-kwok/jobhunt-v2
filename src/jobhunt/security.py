@@ -17,7 +17,28 @@ import stat
 import subprocess
 from pathlib import Path
 
-ENV_PATH = Path(".env")
+from dotenv import find_dotenv, load_dotenv
+
+
+def resolve_env_path() -> Path:
+    """The ONE `.env` path used for loading, auditing and preflight.
+
+    Walks up from the current working directory (``find_dotenv(usecwd=True)``),
+    falling back to ``./.env`` when none exists yet. Previously the CLI loaded
+    via ``load_dotenv()`` (which walks up from the installed script) while the
+    audit checked ``Path(".env")`` in the cwd, so they could disagree.
+    """
+    found = find_dotenv(usecwd=True)
+    return Path(found) if found else Path.cwd() / ".env"
+
+
+def load_env() -> Path:
+    """Load the resolved `.env` into os.environ (existing vars win). Returns the path."""
+    path = resolve_env_path()
+    if path.exists():
+        load_dotenv(path)
+    return path
+
 
 # Anthropic keys look like: sk-ant-api03-....  Redact anything key-shaped.
 _KEY_RE = re.compile(r"sk-ant-[A-Za-z0-9\-_]{8,}")
@@ -66,8 +87,9 @@ def get_api_key(*, required: bool = True) -> str | None:
     return key
 
 
-def harden_env_permissions(path: Path = ENV_PATH) -> list[str]:
+def harden_env_permissions(path: Path | None = None) -> list[str]:
     """Force `.env` to 0600 (owner-only). Returns human-readable notes."""
+    path = path or resolve_env_path()
     notes: list[str] = []
     if not path.exists():
         return notes
@@ -79,8 +101,9 @@ def harden_env_permissions(path: Path = ENV_PATH) -> list[str]:
     return notes
 
 
-def env_is_git_ignored(path: Path = ENV_PATH) -> bool:
+def env_is_git_ignored(path: Path | None = None) -> bool:
     """True if git would ignore `.env` (so it can never be accidentally added)."""
+    path = path or resolve_env_path()
     try:
         result = subprocess.run(
             ["git", "check-ignore", str(path)],
@@ -93,8 +116,9 @@ def env_is_git_ignored(path: Path = ENV_PATH) -> bool:
         return False
 
 
-def env_is_tracked(path: Path = ENV_PATH) -> bool:
+def env_is_tracked(path: Path | None = None) -> bool:
     """True if `.env` is already tracked by git (a serious problem)."""
+    path = path or resolve_env_path()
     try:
         result = subprocess.run(
             ["git", "ls-files", "--error-unmatch", str(path)],
@@ -107,8 +131,9 @@ def env_is_tracked(path: Path = ENV_PATH) -> bool:
         return False
 
 
-def audit(path: Path = ENV_PATH) -> tuple[bool, list[tuple[str, bool, str]]]:
+def audit(path: Path | None = None) -> tuple[bool, list[tuple[str, bool, str]]]:
     """Run every check. Returns (all_ok, [(label, ok, detail), ...])."""
+    path = path or resolve_env_path()
     checks: list[tuple[str, bool, str]] = []
 
     # 1. key present (not printed)
@@ -144,12 +169,13 @@ def audit(path: Path = ENV_PATH) -> tuple[bool, list[tuple[str, bool, str]]]:
     return all_ok, checks
 
 
-def preflight(path: Path = ENV_PATH) -> list[str]:
+def preflight(path: Path | None = None) -> list[str]:
     """Run the cheap protections before any API use. Returns warnings to show.
 
     Hardens `.env` permissions and refuses to run if the key is somehow tracked
     by git (which would mean it's about to be, or already is, committed).
     """
+    path = path or resolve_env_path()
     notes = harden_env_permissions(path)
     if env_is_tracked(path):
         raise SecurityError(

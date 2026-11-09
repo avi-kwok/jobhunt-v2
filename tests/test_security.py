@@ -1,5 +1,6 @@
 """Key-protection safeguards: redaction, env-only key access, file perms, audit."""
 
+import os
 import stat
 
 import pytest
@@ -88,3 +89,32 @@ def test_audit_reports_missing_key(monkeypatch, tmp_path):
     labels = {label: ok for label, ok, _ in checks}
     assert labels["API key present in env"] is False
     assert all_ok is False
+
+
+# ---- single resolved .env path (dotenv bug fix) ----------------------------
+
+def test_load_env_and_audit_share_one_resolved_path(monkeypatch, tmp_path):
+    """load_env() and audit()/preflight() must look at the same cwd-resolved .env."""
+    proj = tmp_path / "proj"
+    sub = proj / "sub"
+    sub.mkdir(parents=True)
+    env = proj / ".env"
+    env.write_text("JH_TEST_SENTINEL=hello\n")
+    env.chmod(0o644)
+    monkeypatch.delenv("JH_TEST_SENTINEL", raising=False)
+    monkeypatch.chdir(sub)  # walks UP from cwd, not from the installed script
+
+    assert security.resolve_env_path().resolve() == env.resolve()
+    loaded = security.load_env()
+    assert loaded.resolve() == env.resolve()
+    assert os.environ["JH_TEST_SENTINEL"] == "hello"
+
+    # audit() with no argument inspects that same file (it is world-readable here)
+    _, checks = security.audit()
+    labels = {label: ok for label, ok, _ in checks}
+    assert labels[".env is owner-only (600)"] is False
+    assert ".env exists" not in labels
+    # preflight() hardens that same file
+    security.preflight()
+    assert stat.S_IMODE(env.stat().st_mode) == 0o600
+    monkeypatch.delenv("JH_TEST_SENTINEL", raising=False)

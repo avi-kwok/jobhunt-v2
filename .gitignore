@@ -31,3 +31,5 @@ build/
 dist/
 .venv/
 venv/
+
+jobhunt_v2.db*

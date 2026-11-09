@@ -19,11 +19,21 @@ JOB_BASE = "https://www.amazon.jobs"
 PAGE_SIZE = 100
 MAX_PAGES = 20
 
-# The software-development category alone returns ~10k roles — far past the page
-# cap, so the most-recent 2000 crowd out everything else and internships sort low
-# enough to fall off. Narrow with internship keywords (each a few hundred hits at
-# most) and union: guarantees every SWE intern/co-op is fetched, uncapped. The
-# title-prefilter still requires an internship + role term, so this is a superset.
+# Narrow server-side with internship keywords only (each a few hundred hits at
+# most, well under the page cap) and union them. The title-prefilter still
+# requires an internship + role term, so this is a superset of eligible roles —
+# SWE and PM/TPM internships alike.
+#
+# Deliberately NO category filter (verified live 2026-10):
+# - A plain ``category=<slug>`` param is silently ignored by search.json (same hit
+#   count as no filter); only ``category[]=<slug>`` (repeatable) actually filters.
+# - Amazon's categories are unreliable for interns: eligible postings are spread
+#   over 7+ categories, e.g. "Software Development Engineer Intern - Summer 2027
+#   (CAN)" and "2027 Program/Product Manager Intern" are filed under
+#   "Administrative Support", and PM interns also appear under "Operations, IT, &
+#   Support Engineering" and "Business Intelligence" — not just
+#   project-program-product-management-{technical,non-tech}. Filtering by
+#   category would silently drop them, and "intern"+"co-op" is only ~6 requests.
 BASE_QUERIES = ("intern", "co-op")
 
 
@@ -54,7 +64,6 @@ class AmazonAdapter(Adapter):
 
     def _search(self, company: CompanyConfig, base_query: str) -> list[Job]:
         params_base = {
-            "category": "software-development",
             "result_limit": PAGE_SIZE,
             "sort": "recent",
             "base_query": base_query,
