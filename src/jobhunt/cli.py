@@ -23,7 +23,11 @@ from .notifier import LOCATION_LABELS, PRIORITY_LABELS, DiscordNotifier
 from .watchdog import start_watchdog
 
 app = typer.Typer(
-    help="Personal SWE-internship scanner + resume tailor.", no_args_is_help=True
+    help="Personal SWE-internship scanner + resume tailor.",
+    no_args_is_help=True,
+    # Tracebacks must never print local variables: they hold DATABASE_URL (with its password),
+    # webhook URLs and the secret key, and cron mails/logs would keep them.
+    pretty_exceptions_show_locals=False,
 )
 console = Console()
 
