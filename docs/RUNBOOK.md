@@ -10,8 +10,11 @@ checked out on your Mac with `.venv` set up (`pip install -e '.[dev]'`).
 ## 1. Generate the secret key (Mac)
 
 ```
-.venv/bin/jobhunt keygen
+cd ~/jobhunt-v2 && .venv/bin/jobhunt keygen
 ```
+
+The bare `jobhunt` command is not on PATH; either use `.venv/bin/jobhunt` as above or run
+`source .venv/bin/activate` first.
 
 Save the output in your password manager. This one value goes into Vercel AND the worker `.env`.
 Both must hold the same key, or stored webhooks cannot be decrypted. Never commit it.
@@ -119,6 +122,9 @@ with a private manage link appears in that channel. Open it and press **Activate
 - **Pause the worker**: `crontab -l | sed '/^# BEGIN jobhunt-v2/,/^# END jobhunt-v2/{/^[*0-9]/s/^/#PAUSED /;}' | crontab -`
   comments the three job lines (markers stay). Re-running `worker-setup.sh` restores them. A running scan finishes
   (or is killed by `timeout 1800`).
+- **Retention**: each scan deletes postings first seen and last seen more than 90 days ago, and
+  `pending` subscribers (never activated) created more than 7 days ago. Active, paused and
+  disabled subscribers are never expired.
 - **Update code**: re-run `worker-setup.sh` on the worker; Vercel redeploys on every push to `main`.
 - **Rotate `JOBHUNT_SECRET_KEY`**: generate a new one, set it in Vercel (redeploy) and the worker
   `.env`. Stored webhooks are encrypted with the old key and become unreadable: the worker disables

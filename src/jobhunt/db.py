@@ -620,6 +620,21 @@ def prune_postings(conn: Conn, days: int = RETENTION_DAYS, now: datetime | None 
     return cur.rowcount
 
 
+PENDING_EXPIRY_DAYS = 7
+
+
+def prune_pending_subscribers(
+    conn: Conn, days: int = PENDING_EXPIRY_DAYS, now: datetime | None = None
+) -> int:
+    """Delete subscribers still 'pending' (never activated) created more than `days` ago."""
+    cutoff = to_iso((now or datetime.now(timezone.utc)) - timedelta(days=days))
+    cur = conn.execute(
+        "DELETE FROM subscribers WHERE status='pending' AND created_at < ?", (cutoff,)
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def stats_24h(conn: Conn) -> dict[str, int]:
     """Heartbeat numbers: active subscribers, postings and deliveries in the last 24h."""
     since = to_iso(datetime.now(timezone.utc) - timedelta(days=1))

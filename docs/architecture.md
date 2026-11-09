@@ -18,7 +18,7 @@ operations: `docs/RUNBOOK.md`. History: `docs/v2-phase0.md`.
    and country-less remote roles pass. Best first: location tier, then company priority.
 4. `deliver` - decrypt the stored URL, re-parse it, build the request URL from (id, token),
    post 10 embeds per message, at most 30 alerts per subscriber per cycle.
-5. Retention - postings first seen more than 90 days ago AND not seen on the board for 90 days are deleted (tags and deliveries cascade). Postings still open stay, so they are never re-alerted.
+5. Retention - postings first seen more than 90 days ago AND not seen on the board for 90 days are deleted (tags and deliveries cascade). Postings still open stay, so they are never re-alerted. Subscribers still `pending` (never activated) after 7 days are deleted in the same step.
 
 Delivery is at-least-once: a `pending` delivery older than 1 hour is retried (a crash between
 reserve and send cannot lose alerts; it can at worst duplicate one). Discord 404 or 401 disables

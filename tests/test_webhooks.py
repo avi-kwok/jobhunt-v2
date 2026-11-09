@@ -57,3 +57,10 @@ def test_rejects_non_ascii_digits():
 
     with _pt.raises(_w.WebhookError):
         _w.parse("https://discord.com/api/webhooks/" + "\u0661" * 18 + "/" + "a" * 60)
+
+
+def test_httpx_loggers_pinned_to_warning():
+    import logging
+
+    for name in ("httpx", "httpcore"):
+        assert logging.getLogger(name).level == logging.WARNING

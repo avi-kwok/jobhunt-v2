@@ -315,6 +315,12 @@ def scan(
         pruned = v2db.prune_postings(conn)
         if pruned:
             console.print(f"[dim]Pruned {pruned} posting(s) older than {v2db.RETENTION_DAYS} days.[/]")
+        expired = v2db.prune_pending_subscribers(conn)
+        if expired:
+            console.print(
+                f"[dim]Removed {expired} pending subscriber(s) older than "
+                f"{v2db.PENDING_EXPIRY_DAYS} days.[/]"
+            )
     finally:
         conn.close()
 

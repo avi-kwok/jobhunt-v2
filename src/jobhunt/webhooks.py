@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import NamedTuple
 from urllib.parse import urlsplit
+
+# httpx logs full request URLs at INFO, and a Discord webhook URL carries its secret token.
+# Imported by both the worker CLI and the web app, so this runs for both.
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 ALLOWED_HOSTS = {"discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com"}
 _PATH_RE = re.compile(r"^/api/webhooks/([0-9]{17,20})/([A-Za-z0-9_-]{60,80})/?$", re.ASCII)

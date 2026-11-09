@@ -214,3 +214,13 @@ def test_init_schema_skip_path_keeps_data(conn):
     db.init_schema(conn)
     assert db.get_subscriber(conn, sid) is not None
     assert _count(conn, "schema_version") == 1
+
+
+def test_prune_pending_subscribers(conn):
+    old_p, new_p, old_a = make_sub(conn, 1, status="pending"), make_sub(conn, 2, status="pending"), make_sub(conn, 3)
+    for sid, days in ((old_p, 8), (new_p, 6), (old_a, 30)):
+        conn.execute("UPDATE subscribers SET created_at=? WHERE id=?",
+                     (db.to_iso(NOW - timedelta(days=days)), sid))
+    conn.commit()
+    assert db.prune_pending_subscribers(conn, now=NOW) == 1
+    assert sorted(r[0] for r in conn.execute("SELECT id FROM subscribers").fetchall()) == [new_p, old_a]
