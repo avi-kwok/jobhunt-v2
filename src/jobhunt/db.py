@@ -177,11 +177,12 @@ def is_postgres_url(target) -> bool:
     return isinstance(target, str) and target.startswith(("postgres://", "postgresql://"))
 
 
-def connect(target: Path | str | None = None) -> Conn:
+def connect(target: Path | str | None = None, *, ensure_schema: bool = True) -> Conn:
     """Open the database and ensure the schema.
 
     `target`: a postgres URL, a SQLite path, or None (DATABASE_URL if set, else the
-    default SQLite file).
+    default SQLite file). `ensure_schema=False` skips the schema check (the web app
+    does it once per process).
     """
     if target is None:
         target = os.environ.get("DATABASE_URL") or DEFAULT_DB_PATH
@@ -198,7 +199,8 @@ def connect(target: Path | str | None = None) -> Conn:
         raw.execute("PRAGMA journal_mode=WAL")
         raw.execute("PRAGMA foreign_keys=ON")
         conn = Conn(raw, "sqlite")
-    init_schema(conn)
+    if ensure_schema:
+        init_schema(conn)
     return conn
 
 
@@ -410,6 +412,91 @@ def disable_subscriber(conn: Conn, sub_id: int, reason: str) -> None:
         (reason, sub_id),
     )
     conn.commit()
+
+
+def get_subscriber_by_hash(conn: Conn, webhook_hash: str) -> Subscriber | None:
+    r = conn.execute(
+        f"SELECT {_SUB_COLS} FROM subscribers WHERE webhook_hash=?", (webhook_hash,)
+    ).fetchone()
+    return _sub_from_row(r) if r else None
+
+
+def get_subscriber_by_token(conn: Conn, manage_token_hash: str) -> Subscriber | None:
+    r = conn.execute(
+        f"SELECT {_SUB_COLS} FROM subscribers WHERE manage_token_hash=?", (manage_token_hash,)
+    ).fetchone()
+    return _sub_from_row(r) if r else None
+
+
+def rotate_manage_token(conn: Conn, sub_id: int, manage_token_hash: str) -> None:
+    """Replace the manage token (the old one stops working). A disabled subscriber whose
+    webhook verified again goes back to pending so it can be re-activated."""
+    conn.execute(
+        "UPDATE subscribers SET manage_token_hash=?, "
+        "disabled_reason=CASE WHEN status='disabled' THEN NULL ELSE disabled_reason END, "
+        "fail_count=CASE WHEN status='disabled' THEN 0 ELSE fail_count END, "
+        "status=CASE WHEN status='disabled' THEN 'pending' ELSE status END WHERE id=?",
+        (manage_token_hash, sub_id),
+    )
+    conn.commit()
+
+
+def set_prefs(conn: Conn, sub_id: int, countries: list[str], levels: list[str]) -> None:
+    conn.execute(
+        "UPDATE subscribers SET countries=?, levels=? WHERE id=?",
+        (json.dumps(countries), json.dumps(levels), sub_id),
+    )
+    conn.commit()
+
+
+def pause_subscriber(conn: Conn, sub_id: int) -> bool:
+    cur = conn.execute(
+        "UPDATE subscribers SET status='paused' WHERE id=? AND status='active'", (sub_id,)
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def take_verify_slot(
+    conn: Conn, sub_id: int, limit: int = 3, window: timedelta = timedelta(hours=24)
+) -> bool:
+    """Atomically count one channel message for this subscriber; False if over `limit` per window."""
+    now = datetime.now(timezone.utc)
+    cutoff, now_iso = to_iso(now - window), to_iso(now)
+    expired = "(verify_window_start IS NULL OR verify_window_start < ?)"
+    cur = conn.execute(
+        f"UPDATE subscribers SET verify_count=CASE WHEN {expired} THEN 1 ELSE verify_count+1 END, "
+        f"verify_window_start=CASE WHEN {expired} THEN ? ELSE verify_window_start END "
+        f"WHERE id=? AND ({expired} OR verify_count < ?)",
+        (cutoff, cutoff, now_iso, sub_id, cutoff, limit),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def refund_verify_slot(conn: Conn, sub_id: int) -> None:
+    """Give back one slot after a channel message failed to send."""
+    conn.execute(
+        "UPDATE subscribers SET verify_count=CASE WHEN verify_count>0 THEN verify_count-1 "
+        "ELSE 0 END WHERE id=?",
+        (sub_id,),
+    )
+    conn.commit()
+
+
+def rate_limit_hit(conn: Conn, key_hash: str, limit: int) -> bool:
+    """Count one hit in the current hour (fixed window); True if still within `limit`."""
+    now = datetime.now(timezone.utc)
+    start = to_iso(now.replace(minute=0, second=0, microsecond=0))
+    conn.execute("DELETE FROM rate_limits WHERE window_start < ?", (to_iso(now - timedelta(hours=2)),))
+    n = conn.execute(
+        "INSERT INTO rate_limits (key_hash, window_start, count) VALUES (?,?,1) "
+        "ON CONFLICT (key_hash, window_start) DO UPDATE SET count = rate_limits.count + 1 "
+        "RETURNING count",
+        (key_hash, start),
+    ).fetchone()[0]
+    conn.commit()
+    return n <= limit
 
 
 def remove_subscriber(conn: Conn, sub_id: int) -> bool:

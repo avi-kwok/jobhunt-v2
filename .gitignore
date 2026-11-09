@@ -36,3 +36,6 @@ jobhunt_v2.db*
 
 # local postgres for tests
 .pgdata/
+
+# local launchd plist (personal label) — never publish
+deploy/com.avidankwok.jobhunt.full.plist

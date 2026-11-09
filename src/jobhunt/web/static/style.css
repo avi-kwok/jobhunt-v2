@@ -1,0 +1,16 @@
+:root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fafafa; --mut: #5f6368; --acc: #5865f2; --line: #d0d4da; }
+@media (prefers-color-scheme: dark) { :root { --fg: #e8e8ea; --bg: #16171a; --mut: #9aa0a6; --line: #34363c; } }
+body { font: 16px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; }
+main { max-width: 38rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+h1 { font-size: 1.6rem; margin: 0 0 .5rem; } h2 { font-size: 1.1rem; margin-top: 1.8rem; }
+a { color: var(--acc); } .muted { color: var(--mut); font-size: .9rem; }
+form { display: grid; gap: .8rem; margin: 1rem 0; }
+fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 0; }
+input[type=text], input[type=url] { width: 100%; box-sizing: border-box; padding: .6rem; font: inherit; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+button { font: inherit; padding: .55rem 1rem; border: 0; border-radius: 6px; background: var(--acc); color: #fff; cursor: pointer; }
+button.alt { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+button.danger { background: #c5221f; }
+.row { display: flex; gap: .6rem; flex-wrap: wrap; }
+.notice { padding: .6rem .8rem; border-left: 4px solid var(--acc); background: color-mix(in srgb, var(--acc) 12%, transparent); }
+.error { padding: .6rem .8rem; border-left: 4px solid #c5221f; background: color-mix(in srgb, #c5221f 12%, transparent); }
+footer { margin-top: 2.5rem; }

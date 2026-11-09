@@ -74,3 +74,8 @@ def new_token() -> str:
 
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def keyed_hash(value: str, key: str | None = None) -> str:
+    """HMAC of an arbitrary string (e.g. a client IP) so rate-limit keys hold no raw values."""
+    return webhook_hash(value, key)

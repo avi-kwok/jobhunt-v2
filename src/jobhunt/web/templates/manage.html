@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Manage jobhunt alerts{% endblock %}
+{% block body %}
+<h1>Manage alerts</h1>
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<p>Status: <strong>{{ sub.status }}</strong>
+{% if sub.status == "pending" %} - not sending yet.{% elif sub.status == "disabled" %} - Discord rejected our messages. Subscribe again from the home page to re-enable.{% endif %}</p>
+
+{% if sub.status != "disabled" %}
+<form method="post" action="/manage">
+<input type="hidden" name="t" value="{{ token }}">
+<fieldset><legend>Countries</legend>
+{% for c in countries %}<label><input type="checkbox" name="countries" value="{{ c }}" {% if c in sub.countries %}checked{% endif %}> {{ c }}</label>{% endfor %}</fieldset>
+<fieldset><legend>Levels</legend>
+{% for l in levels %}<label><input type="checkbox" name="levels" value="{{ l }}" {% if l in sub.levels %}checked{% endif %}> {{ l }}</label>{% endfor %}</fieldset>
+<div><button type="submit" name="action" value="update" class="alt">Save preferences</button></div>
+</form>
+{% endif %}
+
+<div class="row">
+{% for act, label, show in [("activate", "Activate", sub.status == "pending"), ("pause", "Pause", sub.status == "active"), ("resume", "Resume", sub.status == "paused")] %}
+{% if show %}<form method="post" action="/manage"><input type="hidden" name="t" value="{{ token }}"><button type="submit" name="action" value="{{ act }}">{{ label }}</button></form>{% endif %}
+{% endfor %}
+<form method="post" action="/manage"><input type="hidden" name="t" value="{{ token }}"><button type="submit" name="action" value="delete" class="danger">Delete everything</button></form>
+</div>
+<p class="muted">Delete removes your stored webhook, preferences and delivery history. It does not touch the webhook in Discord.</p>
+{% endblock %}

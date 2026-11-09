@@ -1,0 +1,8 @@
+# Allowlist: upload only what the web app needs. Keeps pyproject.toml (worker deps) out so
+# Vercel installs requirements.txt only, and keeps databases, logs and secrets out.
+/*
+!app.py
+!requirements.txt
+!.python-version
+!vercel.json
+!src

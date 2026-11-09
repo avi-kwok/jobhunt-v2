@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}jobhunt - internship alerts in Discord{% endblock %}
+{% block body %}
+<h1>jobhunt</h1>
+<p>Software engineering and adjacent internships and co-ops in Canada and the US, sent to your Discord channel as soon as they are posted. Free. No account.</p>
+
+<h2>1. Create a webhook in Discord</h2>
+<ol>
+<li>Open the channel's settings: Integrations, then Webhooks, then New Webhook.</li>
+<li>Pick the channel and a name, then press Copy Webhook URL.</li>
+<li>Paste it below.</li>
+</ol>
+
+<h2>2. Subscribe</h2>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/subscribe">
+<label>Discord webhook URL
+<input type="text" name="webhook_url" required maxlength="300" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/..."></label>
+<fieldset><legend>Countries</legend>
+<label><input type="checkbox" name="countries" value="CA" checked> Canada</label>
+<label><input type="checkbox" name="countries" value="US" checked> United States</label></fieldset>
+<fieldset><legend>Levels</legend>
+<label><input type="checkbox" name="levels" value="internship" checked> Internship</label>
+<label><input type="checkbox" name="levels" value="coop" checked> Co-op</label></fieldset>
+<div><button type="submit">Send me a confirmation link</button></div>
+</form>
+<p class="muted">We post a private link in your channel. Opening it and pressing Activate proves you can read the channel.</p>
+{% endblock %}
