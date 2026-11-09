@@ -1,29 +1,73 @@
-"""CLI: user seed-owner / list, scan without LLM, list-matches (offline)."""
+"""CLI: db init, keygen, subscriber admin, scan without LLM (offline)."""
 
+from conftest import hook_url
 from typer.testing import CliRunner
 
 from jobhunt import cli, db
 
 runner = CliRunner()
+TOKEN = "A" * 64
 
 
-def test_seed_owner_idempotent_and_list(tmp_path):
+def _add(path, env_val=None, **opts):
+    env = {"MY_HOOK": env_val or hook_url(1)}
+    args = ["subscriber", "add", "--webhook-env", "MY_HOOK", "--db", path]
+    for k, v in opts.items():
+        args += [f"--{k}", v]
+    return runner.invoke(cli.app, args, env=env)
+
+
+def test_db_init_and_keygen(tmp_path):
+    r = runner.invoke(cli.app, ["db", "init", "--db", str(tmp_path / "x.db")])
+    assert r.exit_code == 0 and "version=2" in r.output
+    r = runner.invoke(cli.app, ["keygen"])
+    assert r.exit_code == 0
+    from jobhunt import crypto
+
+    crypto.require_key(r.output.strip())
+
+
+def test_subscriber_add_list_remove_never_prints_url(tmp_path):
     path = str(tmp_path / "v2.db")
-    r = runner.invoke(cli.app, ["user", "seed-owner", "--db", path])
+    outputs = []
+    r = _add(path, countries="US", levels="coop")
+    outputs.append(r.output)
     assert r.exit_code == 0, r.output
-    r = runner.invoke(cli.app, ["user", "seed-owner", "--db", path])
-    assert r.exit_code == 0 and "already exists" in r.output
+    r2 = _add(path)  # same webhook again
+    outputs.append(r2.output)
+    assert r2.exit_code == 1 and "already subscribed" in r2.output
+    lst = runner.invoke(cli.app, ["subscriber", "list", "--db", path])
+    outputs.append(lst.output)
+    assert lst.exit_code == 0 and "active" in lst.output and "...0001" in lst.output.replace(" ", "")
     conn = db.connect(path)
-    users = db.list_users(conn)
+    sub = db.list_subscribers(conn)[0]
     conn.close()
-    assert len(users) == 1
-    u = users[0]
-    assert u.id == 1 and u.status == "active"
-    assert u.destination.kind == "webhook_env" and u.destination.ref == "V2_DISCORD_WEBHOOK_URL"
-    assert u.prefs.levels == ["internship", "coop"] and u.prefs.countries == ["CA", "US"]
-    assert u.prefs.remote_ok and "Google" in u.prefs.favorite_companies
-    out = runner.invoke(cli.app, ["user", "list", "--db", path]).output
-    assert "active" in out and "Users" in out
+    assert sub.status == "active" and sub.activated_at
+    assert sub.countries == ["US"] and sub.levels == ["coop"]
+    assert hook_url(1) not in sub.webhook_enc
+    rm = runner.invoke(cli.app, ["subscriber", "remove", str(sub.id), "--db", path])
+    outputs.append(rm.output)
+    assert rm.exit_code == 0
+    assert runner.invoke(cli.app, ["subscriber", "remove", "999", "--db", path]).exit_code == 1
+    blob = "\n".join(outputs)
+    assert "discord.com/api/webhooks" not in blob and "AAAAAAAA" not in blob
+
+
+def test_subscriber_add_rejects_bad_input(tmp_path):
+    path = str(tmp_path / "v2.db")
+    r = _add(path, env_val="https://evil.com/api/webhooks/1/2")
+    assert r.exit_code == 2 and "evil.com" not in r.output
+    assert _add(path, countries="FR").exit_code == 2
+    assert _add(path, levels="fulltime").exit_code == 2
+    r = runner.invoke(cli.app, ["subscriber", "add", "--webhook-env", "NOPE", "--db", path])
+    assert r.exit_code == 2
+
+
+def test_subscriber_add_without_key_fails_clearly(tmp_path, monkeypatch):
+    monkeypatch.delenv("JOBHUNT_SECRET_KEY")
+    r = _add(str(tmp_path / "v2.db"))
+    assert r.exit_code == 2 and "JOBHUNT_SECRET_KEY" in r.output
+    assert "discord.com/api" not in r.output
 
 
 def test_scan_has_no_llm_surface():
@@ -37,10 +81,58 @@ def test_scan_has_no_llm_surface():
     assert not hasattr(matcher, "llm_match")
 
 
-def test_default_db_is_v2():
+def test_db_option_defaults_defer_to_database_url():
     import typer.main
 
     cmd = typer.main.get_command(cli.app)
     for name in ("scan", "heartbeat", "list-matches"):
         opt = next(p for p in cmd.commands[name].params if p.name == "db_path")
-        assert opt.default == "jobhunt_v2.db"
+        assert opt.default is None
+
+
+def test_scan_survives_bad_subscriber_row_and_leaks_no_url(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from conftest import make_sub
+
+    from jobhunt.classify import Classification
+    from jobhunt.models import Job
+
+    path = str(tmp_path / "scan.db")
+    now = datetime.now(timezone.utc)
+    conn = db.connect(path)
+    bad = make_sub(conn, 1, activated_at=now - timedelta(days=1))
+    good = make_sub(conn, 2, activated_at=now - timedelta(days=1))
+    conn.execute("UPDATE subscribers SET webhook_enc='garbage' WHERE id=?", (bad,))
+    conn.commit()
+    job = Job(source="x", company="Acme", external_id="1", title="SWE Intern",
+              url="https://x/1", location="Toronto, ON")
+    db.insert_new_postings(conn, [job], seen_at=db.to_iso(now))
+    db.upsert_tags(conn, job.uid, Classification(eligible=True, level="internship",
+                                                 countries=["CA"]))
+    conn.close()
+
+    monkeypatch.setattr(cli.pipeline, "ingest", lambda *a, **k: [])
+    sent = []
+
+    class FakeNotifier:
+        def __init__(self, url):
+            sent.append(url)
+
+        def send_embeds(self, embeds):
+            pass
+
+    real_deliver = cli.pipeline.deliver
+    monkeypatch.setattr(
+        cli.pipeline, "deliver",
+        lambda *a, **k: real_deliver(*a, **{**k, "notifier_factory": FakeNotifier}),
+    )
+    r = runner.invoke(cli.app, ["scan", "--db", path, "--force", "--no-jitter"])
+    assert r.exit_code == 0, r.output
+    assert "discord.com/api/webhooks" not in r.output
+    conn = db.connect(path)
+    assert db.get_subscriber(conn, bad).status == "disabled"
+    assert db.get_subscriber(conn, good).status == "active"
+    assert db.delivery_status(conn, good, job.uid) == "sent"
+    conn.close()
+    assert len(sent) == 1

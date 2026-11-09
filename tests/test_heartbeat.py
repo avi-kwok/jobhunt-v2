@@ -25,37 +25,33 @@ def _fake_cfg(watchlist: int = 3):
 
 
 def _seed_db(path: str) -> None:
-    """Seed a v2 DB: 3 postings in 24h (2 eligible, 1 with a sent delivery), 1 old."""
+    """Seed: 3 postings in 24h (1 sent, 1 failed delivery), 1 old; 1 active + 1 pending sub."""
+    from conftest import make_sub
+
     conn = v2db.connect(path)
     now = datetime.now(timezone.utc)
-    old = now - timedelta(days=3)
-
-    def post(ext, seen, eligible):
+    jobs = []
+    for ext, seen in (("1", now), ("2", now), ("3", now), ("old", now - timedelta(days=3))):
         job = Job(source="x", company="C", external_id=ext, title="SWE Intern", url="u")
         v2db.insert_new_postings(conn, [job], seen_at=v2db.to_iso(seen))
-        v2db.upsert_tags(conn, job.uid, Classification(eligible=eligible, level="internship"))
-        return job
-
-    j1 = post("1", now, True)
-    post("2", now, True)
-    post("3", now, False)
-    post("old", old, True)  # eligible but >24h -> excluded from 24h counts
-    uid = v2db.create_user(conn, v2db.Prefs(), "webhook_env", "X")
-    v2db.reserve_delivery(conn, uid, j1.uid)
-    v2db.mark_sent(conn, uid, [j1.uid])
+        jobs.append(job)
+    sid = make_sub(conn, 1)
+    make_sub(conn, 2, status="pending")
+    v2db.reserve_delivery(conn, sid, jobs[0].uid)
+    v2db.mark_sent(conn, sid, [jobs[0].uid])
+    v2db.reserve_delivery(conn, sid, jobs[1].uid)
+    v2db.mark_failed(conn, sid, [jobs[1].uid])
     conn.close()
 
 
-# ---- (b) 24h ingested/eligible/sent counts ---------------------------------
+# ---- (b) 24h counts --------------------------------------------------------
 
 def test_db_counts_24h_window(tmp_path):
     db = str(tmp_path / "jobhunt_v2.db")
     _seed_db(db)
-    counts = cli._heartbeat_db_counts(db)
-    assert counts["total"] == 4
-    assert counts["ingested_24h"] == 3  # old one excluded
-    assert counts["eligible_24h"] == 2
-    assert counts["sent_24h"] == 1
+    assert cli._heartbeat_db_counts(db) == {
+        "active_subscribers": 1, "postings_24h": 3, "sent_24h": 1, "failed_24h": 1,
+    }
 
 
 # ---- (a) health verdict: fresh vs stale cron.log --------------------------
@@ -127,8 +123,8 @@ def test_notify_path_calls_send_status(monkeypatch, tmp_path):
     captured = {}
 
     class _Fake:
-        def __init__(self, *a, **k):
-            pass
+        def __init__(self, url=None, *a, **k):
+            captured["url"] = url
 
         def send_status(self, title, fields, color):
             captured["title"] = title
@@ -152,12 +148,19 @@ def test_notify_path_calls_send_status(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "load_config", lambda: _fake_cfg())
     monkeypatch.setattr(cli, "DiscordNotifier", _Fake)
 
+    from conftest import hook_url
+
+    monkeypatch.setenv("ADMIN_WEBHOOK_URL", hook_url(9))
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", hook_url(8))
     result = runner.invoke(cli.app, ["heartbeat", "--db", db])
     assert result.exit_code == 0
+    assert captured["url"] == hook_url(9)  # admin channel, never DISCORD_WEBHOOK_URL
+    assert hook_url(9) not in result.output
     assert captured["title"].startswith("🟢")
     assert captured["color"] == 0x2ECC71
     names = {n for n, _ in captured["fields"]}
-    assert {"Status", "Watchlist", "Alerts sent (24h)"} <= names
+    assert {"Status", "Watchlist", "Active subscribers", "Postings (24h)",
+                   "Deliveries sent (24h)", "Deliveries failed (24h)"} <= names
     assert "Spend" not in names
 
 
@@ -171,3 +174,25 @@ def test_send_status_noop_on_empty_fields():
     notifier._post = lambda embeds: posted.append(embeds)
     notifier.send_status("title", [], 0x000000)
     assert posted == []
+
+
+def test_heartbeat_without_admin_webhook_posts_nothing(monkeypatch, tmp_path):
+    from conftest import hook_url
+
+    called = []
+
+    class _Fake:
+        def __init__(self, *a, **k):
+            called.append(a)
+
+    db = str(tmp_path / "jobhunt_v2.db")
+    v2db.connect(db).close()
+    monkeypatch.setattr(cli, "CRON_LOG_PATH", tmp_path / "none.log")
+    monkeypatch.setattr(cli, "LAST_RUN_PATH", tmp_path / "none.json")
+    monkeypatch.setattr(cli, "load_config", lambda: _fake_cfg())
+    monkeypatch.setattr(cli, "DiscordNotifier", _Fake)
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", hook_url(8))
+    monkeypatch.delenv("ADMIN_WEBHOOK_URL", raising=False)
+    result = runner.invoke(cli.app, ["heartbeat", "--db", db])
+    assert result.exit_code == 0 and "ADMIN_WEBHOOK_URL" in result.output
+    assert called == []

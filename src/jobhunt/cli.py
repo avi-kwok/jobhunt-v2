@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import time
 from datetime import datetime, timedelta, timezone
@@ -14,7 +15,7 @@ from rich.table import Table
 
 from . import adapters  # noqa: F401 - registers adapters
 from . import db as v2db
-from . import pipeline, security
+from . import crypto, pipeline, security, webhooks
 from .budget import BudgetExceeded, BudgetGuard  # tailor + `budget` command only
 from .config import load_config
 from .matcher import location_tier
@@ -48,6 +49,8 @@ def _write_last_run_marker(companies: int, new_postings: int, alerts_sent: int) 
     }
     LAST_RUN_PATH.write_text(json.dumps(payload))
 
+
+DB_HELP = "SQLite path, or postgres URL. Default: DATABASE_URL if set, else jobhunt_v2.db."
 
 # ---- init -----------------------------------------------------------------
 
@@ -90,8 +93,12 @@ experience: []
 
 _ENV_STUB = (
     "ANTHROPIC_API_KEY=\n"
-    "DISCORD_WEBHOOK_URL=\n"
-    "V2_DISCORD_WEBHOOK_URL=\n"
+    "# Admin channel for heartbeats (never subscriber webhooks).\n"
+    "ADMIN_WEBHOOK_URL=\n"
+    "# `jobhunt keygen` prints a value for this.\n"
+    "JOBHUNT_SECRET_KEY=\n"
+    "# Postgres (Supabase) URL; leave empty for local SQLite.\n"
+    "DATABASE_URL=\n"
     "# Optional: contact address sent in the scraper User-Agent.\n"
     "JOBHUNT_CONTACT=\n"
 )
@@ -199,8 +206,8 @@ def scan(
         False,
         "--seed",
         help="Alias mode: ingest + classify postings WITHOUT matching or delivering. "
-        "Run it before `user seed-owner` so existing postings predate the owner's "
-        "activated_at (users only receive postings first seen after activation).",
+        "Run it before adding subscribers so existing postings predate their "
+        "activated_at (subscribers only receive postings first seen after activation).",
     ),
     no_jitter: bool = typer.Option(
         False, "--no-jitter", help="Skip the random startup delay (for interactive runs)."
@@ -208,9 +215,9 @@ def scan(
     force: bool = typer.Option(
         False, "--force", help="Run even during the configured nightly quiet hours."
     ),
-    db_path: str = typer.Option("jobhunt_v2.db", "--db", help="SQLite path (v2 schema)."),
+    db_path: str = typer.Option(None, "--db", help=DB_HELP),
 ) -> None:
-    """v2 pipeline: ingest -> classify -> match users -> deliver. No LLM."""
+    """v2 pipeline: ingest -> classify -> match subscribers -> deliver. No LLM."""
     cfg = load_config()
 
     # Nightly quiet window: scheduled runs self-skip (seed/--force bypass it).
@@ -234,6 +241,13 @@ def scan(
                 console.print(f"[dim]security: {note}[/]")
         except security.SecurityError as exc:
             console.print(f"[red]Security check failed:[/] {exc}")
+            raise typer.Exit(2)
+
+    if not seed and not no_notify:
+        try:
+            crypto.require_key()
+        except crypto.CryptoError as exc:
+            console.print(f"[red]{exc}[/]")
             raise typer.Exit(2)
 
     console.print(
@@ -262,25 +276,44 @@ def scan(
         )
 
         if not seed:
-            users = v2db.list_active_users(conn)
-            if not users:
-                console.print("[yellow]No active users — run `jobhunt user seed-owner`.[/]")
-            plan = pipeline.match_users(cfg, conn, users)
-            for user in users:
-                res = pipeline.deliver(
-                    conn, user, plan.get(user.id, []), dry_run=no_notify, log=log
-                )
+            subs = v2db.list_active_subscribers(conn)
+            if not subs:
+                console.print("[yellow]No active subscribers.[/]")
+            plan = pipeline.match_subscribers(cfg, conn, subs)
+            for sub in subs:
+                try:
+                    res = pipeline.deliver(
+                        conn, sub, plan.get(sub.id, []), dry_run=no_notify, log=log
+                    )
+                except Exception as exc:  # noqa: BLE001 - one bad row must not starve the rest
+                    try:
+                        conn.rollback()
+                        if isinstance(exc, (crypto.CryptoError, webhooks.WebhookError)):
+                            v2db.disable_subscriber(
+                                conn, sub.id, "stored webhook undecryptable or invalid"
+                            )
+                            totals["disabled"] += 1
+                        else:
+                            v2db.subscriber_failed(conn, sub.id)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    totals["failed"] += 1
+                    log(f"subscriber {sub.id}: delivery error: {security.redact(str(exc))}")
+                    continue
                 totals["sent"] += res.sent
                 totals["failed"] += res.failed
                 totals["dry"] += int(res.dry_run)
                 totals["disabled"] += int(res.disabled)
                 if res.sent:
-                    console.print(f"[green]User {user.id}: sent {res.sent} alert(s).[/]")
+                    console.print(f"[green]Subscriber {sub.id}: sent {res.sent} alert(s).[/]")
                 if res.skipped_over_cap:
                     console.print(
-                        f"[dim]User {user.id}: {res.skipped_over_cap} more queued "
+                        f"[dim]Subscriber {sub.id}: {res.skipped_over_cap} more queued "
                         "(per-cycle cap).[/]"
                     )
+        pruned = v2db.prune_postings(conn)
+        if pruned:
+            console.print(f"[dim]Pruned {pruned} posting(s) older than {v2db.RETENTION_DAYS} days.[/]")
     finally:
         conn.close()
 
@@ -307,7 +340,7 @@ def list_matches(
         None, "--since", help="Only postings first seen since e.g. '7d' or ISO date."
     ),
     max_priority: int = typer.Option(None, "--max-priority"),
-    db_path: str = typer.Option("jobhunt_v2.db", "--db"),
+    db_path: str = typer.Option(None, "--db", help=DB_HELP),
 ) -> None:
     """Print eligible stored postings ordered by company priority then location tier."""
     cfg = load_config()
@@ -350,69 +383,117 @@ def list_matches(
     console.print(table)
 
 
-# ---- user admin -----------------------------------------------------------
+# ---- db / keys / subscriber admin ------------------------------------------
 
-user_app = typer.Typer(help="Manage v2 users.", no_args_is_help=True)
-app.add_typer(user_app, name="user")
-
-OWNER_WEBHOOK_ENV = "V2_DISCORD_WEBHOOK_URL"
+db_app = typer.Typer(help="Database admin.", no_args_is_help=True)
+app.add_typer(db_app, name="db")
 
 
-@user_app.command("seed-owner")
-def user_seed_owner(
-    db_path: str = typer.Option("jobhunt_v2.db", "--db"),
-) -> None:
-    """Create the owner (user #1) with prefs derived from config.yaml. Idempotent."""
-    cfg = load_config()
+@db_app.command("init")
+def db_init(db_path: str = typer.Option(None, "--db", help=DB_HELP)) -> None:
+    """Create the schema if missing (SQLite file or Postgres). Idempotent."""
     conn = v2db.connect(db_path)
     try:
-        existing = v2db.find_user_by_destination(conn, "webhook_env", OWNER_WEBHOOK_ENV)
-        if existing is not None:
-            console.print(f"[dim]Owner already exists (user {existing}); nothing to do.[/]")
-            return
-        # cities: [] = no city filter. v1 delivered every Canadian/US/remote match
-        # (tiers 1-4) and used tiers only for ORDERING; restricting to the tier 1-2
-        # city lists would silently drop Montreal/Ottawa/Waterloo. Tiers still
-        # rank results via sort_key.
-        prefs = v2db.Prefs(
-            levels=["internship", "coop"],
-            countries=["CA", "US"],
-            cities=[],
-            remote_ok=True,
-            favorite_companies=list(cfg.company_priorities.get(1, [])),
-            muted_companies=[],
+        console.print(
+            f"Schema ready: backend={conn.backend}, version={v2db.schema_version(conn)}"
         )
-        uid = v2db.create_user(conn, prefs, "webhook_env", OWNER_WEBHOOK_ENV)
     finally:
         conn.close()
+
+
+@app.command()
+def keygen() -> None:
+    """Print a new JOBHUNT_SECRET_KEY."""
+    typer.echo(crypto.generate_secret_key())
+
+
+subscriber_app = typer.Typer(help="Manage subscribers (admin).", no_args_is_help=True)
+app.add_typer(subscriber_app, name="subscriber")
+
+_COUNTRIES = {"CA", "US"}
+_LEVELS = {"internship", "coop"}
+
+
+def _csv(value: str, allowed: set[str], what: str, upper: bool) -> list[str]:
+    items = [x.strip() for x in value.split(",") if x.strip()]
+    items = [x.upper() if upper else x.lower() for x in items]
+    if not items or not set(items) <= allowed:
+        console.print(f"[red]--{what} must be a non-empty subset of {sorted(allowed)}[/]")
+        raise typer.Exit(2)
+    return list(dict.fromkeys(items))
+
+
+@subscriber_app.command("add")
+def subscriber_add(
+    webhook_env: str = typer.Option(..., "--webhook-env", help="Env var holding the URL."),
+    countries: str = typer.Option("CA,US", "--countries"),
+    levels: str = typer.Option("internship,coop", "--levels"),
+    db_path: str = typer.Option(None, "--db", help=DB_HELP),
+) -> None:
+    """Validate, encrypt and activate a subscriber immediately (admin path)."""
+    cs = _csv(countries, _COUNTRIES, "countries", True)
+    ls = _csv(levels, _LEVELS, "levels", False)
+    try:
+        hook = webhooks.parse(os.environ.get(webhook_env, ""))
+        enc = crypto.encrypt_url(hook.url)
+        h = crypto.webhook_hash(hook.url)
+    except (webhooks.WebhookError, crypto.CryptoError) as exc:
+        console.print(f"[red]{exc}[/]" if isinstance(exc, crypto.CryptoError)
+                      else f"[red]${webhook_env}: {exc}[/]")
+        raise typer.Exit(2)
+    conn = v2db.connect(db_path)
+    try:
+        sid = v2db.add_subscriber(conn, h, enc, cs, ls, status="active")
+    finally:
+        conn.close()
+    if sid is None:
+        console.print("[yellow]That webhook is already subscribed; nothing added.[/]")
+        raise typer.Exit(1)
     console.print(
-        f"[green]Created owner as user {uid}[/] (activated now; only postings first seen "
-        f"after this moment are delivered). Webhook env var: {OWNER_WEBHOOK_ENV}"
+        f"[green]Subscriber {sid} added and active[/] (webhook {webhooks.mask(hook.id)}); "
+        "only postings first seen from now on are delivered."
     )
 
 
-@user_app.command("list")
-def user_list(db_path: str = typer.Option("jobhunt_v2.db", "--db")) -> None:
-    """List users with status, destination ref (never a URL) and prefs summary."""
+@subscriber_app.command("list")
+def subscriber_list(db_path: str = typer.Option(None, "--db", help=DB_HELP)) -> None:
+    """List subscribers: id, status, prefs, masked webhook id. Never a URL."""
     conn = v2db.connect(db_path)
     try:
-        users = v2db.list_users(conn)
+        subs = v2db.list_subscribers(conn)
     finally:
         conn.close()
-    table = Table(title="Users")
-    for col in ("ID", "Status", "Activated", "Destination", "Levels", "Countries", "Cities",
-                "Favs", "Sent/Fail"):
+    table = Table(title="Subscribers")
+    for col in ("ID", "Status", "Webhook", "Countries", "Levels", "Activated", "Health"):
         table.add_column(col)
-    for u in users:
-        status = u.status + (f" ({u.disabled_reason})" if u.disabled_reason else "")
+    for s in subs:
+        try:
+            masked = webhooks.mask(webhooks.parse(crypto.decrypt_url(s.webhook_enc)).id)
+        except Exception:  # noqa: BLE001 - key missing/wrong: still list, never fail
+            masked = "?"
+        status = s.status + (f" ({s.disabled_reason})" if s.disabled_reason else "")
         table.add_row(
-            str(u.id), status, u.activated_at[:19],
-            f"{u.destination.kind}:{u.destination.ref}",
-            ",".join(u.prefs.levels), ",".join(u.prefs.countries),
-            ",".join(u.prefs.cities) or "(any)", str(len(u.prefs.favorite_companies)),
-            f"ok={u.destination.last_ok_at or '-'} fails={u.destination.fail_count}",
+            str(s.id), status, masked, ",".join(s.countries), ",".join(s.levels),
+            (s.activated_at or "-")[:19], f"ok={s.last_ok_at or '-'} fails={s.fail_count}",
         )
     console.print(table)
+
+
+@subscriber_app.command("remove")
+def subscriber_remove(
+    sub_id: int = typer.Argument(..., metavar="ID"),
+    db_path: str = typer.Option(None, "--db", help=DB_HELP),
+) -> None:
+    """Delete a subscriber and their delivery history."""
+    conn = v2db.connect(db_path)
+    try:
+        ok = v2db.remove_subscriber(conn, sub_id)
+    finally:
+        conn.close()
+    if not ok:
+        console.print(f"[yellow]No subscriber {sub_id}.[/]")
+        raise typer.Exit(1)
+    console.print(f"Removed subscriber {sub_id}.")
 
 
 # ---- tailor ---------------------------------------------------------------
@@ -562,8 +643,8 @@ def _mtime(path: Path) -> datetime | None:
         return None
 
 
-def _heartbeat_db_counts(db_path: str) -> dict:
-    """Watchlist-independent v2 DB stats: totals + last-24h ingested/eligible/sent."""
+def _heartbeat_db_counts(db_path: str | None) -> dict:
+    """Watchlist-independent v2 DB stats (active subscribers, 24h postings/sent/failed)."""
     conn = v2db.connect(db_path)
     try:
         return v2db.stats_24h(conn)
@@ -576,7 +657,7 @@ def heartbeat(
     no_notify: bool = typer.Option(
         False, "--no-notify", help="Print the summary to the console instead of posting."
     ),
-    db_path: str = typer.Option("jobhunt_v2.db", "--db", help="SQLite path (v2 schema)."),
+    db_path: str = typer.Option(None, "--db", help=DB_HELP),
 ) -> None:
     """Post a periodic liveness/status summary to Discord (silence = broken)."""
     cfg = load_config()
@@ -612,9 +693,10 @@ def heartbeat(
         ("Last cron fire", _relative_time(cron_mtime, now)),
         ("Last completed scan", _relative_time(last_scan_ts, now)),
         ("Watchlist", str(watchlist)),
-        ("Postings ingested (24h)", str(counts["ingested_24h"])),
-        ("Eligible (24h)", str(counts["eligible_24h"])),
-        ("Alerts sent (24h)", str(counts["sent_24h"])),
+        ("Active subscribers", str(counts["active_subscribers"])),
+        ("Postings (24h)", str(counts["postings_24h"])),
+        ("Deliveries sent (24h)", str(counts["sent_24h"])),
+        ("Deliveries failed (24h)", str(counts["failed_24h"])),
     ]
 
     if healthy:
@@ -631,8 +713,14 @@ def heartbeat(
         console.print(table)
         return
 
+    # Admin channel only. Never DISCORD_WEBHOOK_URL, never a subscriber webhook.
     try:
-        DiscordNotifier().send_status(title, fields, color)
+        admin = webhooks.parse(os.environ.get("ADMIN_WEBHOOK_URL", ""))
+    except webhooks.WebhookError:
+        console.print("[yellow]Heartbeat not posted:[/] ADMIN_WEBHOOK_URL is unset or invalid.")
+        return
+    try:
+        DiscordNotifier(admin.url).send_status(title, fields, color)
         console.print(f"[green]Posted heartbeat to Discord[/] ({status_text}).")
     except Exception as exc:  # noqa: BLE001
         console.print(f"[yellow]Heartbeat not posted:[/] {security.redact(str(exc))}")

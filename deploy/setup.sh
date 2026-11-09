@@ -132,11 +132,11 @@ mkdir -p logs
 # --- Secrets check ----------------------------------------------------------
 if [ -f "./.env" ]; then
   chmod 600 .env
-  if ! grep -q 'ANTHROPIC_API_KEY' .env || ! grep -q 'DISCORD_WEBHOOK_URL' .env; then
-    warn ".env is missing ANTHROPIC_API_KEY and/or DISCORD_WEBHOOK_URL. Scans may fail or not notify."
+  if ! grep -q 'JOBHUNT_SECRET_KEY' .env || ! grep -q 'ADMIN_WEBHOOK_URL' .env; then
+    warn ".env is missing JOBHUNT_SECRET_KEY and/or ADMIN_WEBHOOK_URL. Scans may fail or not notify."
   fi
 else
-  warn "No .env file found. Create one with ANTHROPIC_API_KEY and DISCORD_WEBHOOK_URL before scanning."
+  warn "No .env file found. Create one with JOBHUNT_SECRET_KEY and ADMIN_WEBHOOK_URL before scanning."
 fi
 
 # --- SAFETY GUARD: refuse to install cron without a seen-store --------------

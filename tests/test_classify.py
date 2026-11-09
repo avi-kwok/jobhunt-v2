@@ -165,3 +165,18 @@ def test_location_foreign():
         c = cls("Software Engineer Intern", loc)
         assert not c.eligible and c.reject_reason == "outside CA/US", loc
         assert not c.location_opaque
+
+
+@pytest.mark.parametrize("title", [
+    "Mobile Marketing Intern", "Mobile Sales Intern", "Mobile Operations Co-op",
+])
+def test_bare_mobile_is_not_swe(title):
+    assert not cls(title).eligible
+
+
+@pytest.mark.parametrize("title", [
+    "Mobile Developer Intern", "Mobile Engineer Co-op", "Mobile Software Intern",
+    "Mobile App Developer Intern",
+])
+def test_mobile_swe_phrases_eligible(title):
+    assert cls(title, "Toronto, ON").eligible

@@ -23,7 +23,8 @@ RULES_VERSION = 1
 
 # Added on top of config role_terms (config terms minus the PM group).
 EXTRA_SWE_TERMS = [
-    "mobile", "ios", "android", "embedded", "firmware",
+    "mobile developer", "mobile engineer", "mobile software", "mobile app",
+    "ios", "android", "embedded", "firmware",
     "machine learning engineer", "ml engineer", "data engineer", "security engineer",
 ]
 

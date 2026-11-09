@@ -107,7 +107,7 @@ Company priority first, then location, then match score. Companies are also *fet
 2. Prefers ATS JSON endpoints over HTML scraping.
 3. **Polite to endpoints:** randomized 0.8–3.0s pause between companies, startup jitter, low concurrency, timeouts, retry-with-backoff, and a descriptive User-Agent.
 4. **The tailor never fabricates.** It may only select, reorder, and lightly rephrase facts already in `master_resume.yaml` — enforced in the system prompt (`tailor/tailor.py`). Any `TODO(...)` bullet is ignored.
-5. **No secrets in code.** `ANTHROPIC_API_KEY` and `DISCORD_WEBHOOK_URL` come from `.env` (git-ignored). Both are masked by `security.redact()` before anything is printed — a webhook URL is itself a credential, so an HTTP error can't leak it into a log.
+5. **No secrets in code.** `JOBHUNT_SECRET_KEY`, `DATABASE_URL`, `ADMIN_WEBHOOK_URL` (and `ANTHROPIC_API_KEY` for the legacy tailor) come from `.env` (git-ignored). Subscriber webhooks are stored encrypted in the database. Secrets are masked by `security.redact()` before anything is printed — a webhook URL is itself a credential, so an HTTP error can't leak it into a log.
 6. **No personal data in the repo.** `master_resume.yaml` and the `jobhunt.db` seen-store are git-ignored; the repo ships `master_resume.example.yaml` instead.
 
 ## Spend safeguards
@@ -135,7 +135,7 @@ git clone <your-fork-url> jobhunt && cd jobhunt
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"                            # add ",browser" for the Playwright extra
 
-cp .env.example .env                               # fill in ANTHROPIC_API_KEY + DISCORD_WEBHOOK_URL
+cp .env.example .env                               # fill in JOBHUNT_SECRET_KEY (jobhunt keygen), ADMIN_WEBHOOK_URL, DATABASE_URL
 cp master_resume.example.yaml master_resume.yaml   # replace with your real facts
 ```
 

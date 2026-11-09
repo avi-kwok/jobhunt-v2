@@ -19,6 +19,8 @@ dependencies = [
     "typer==0.15.1",
     "click==8.1.8",
     "rich==13.9.2",
+    "psycopg[binary]>=3.2,<4",
+    "cryptography>=43",
 ]
 
 [project.optional-dependencies]

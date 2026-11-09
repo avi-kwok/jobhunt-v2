@@ -33,3 +33,6 @@ dist/
 venv/
 
 jobhunt_v2.db*
+
+# local postgres for tests
+.pgdata/

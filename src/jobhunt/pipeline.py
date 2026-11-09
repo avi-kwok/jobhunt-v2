@@ -1,20 +1,18 @@
-"""v2 pipeline stages as plain functions: ingest -> classify_new -> match_users -> deliver.
+"""v2 pipeline stages as plain functions: ingest -> classify_new -> match_subscribers -> deliver.
 
-No LLM anywhere. Every stage takes an open sqlite3 connection (see db.connect)
-so tests can drive them with in-memory/temp databases and fake adapters.
+No LLM anywhere. Every stage takes an open db.Conn (SQLite or Postgres, see db.connect)
+so tests can drive them with temp databases and fake adapters.
 """
 
 from __future__ import annotations
 
-import os
 import random
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Mapping
+from typing import Callable
 
-from . import db
+from . import crypto, db, webhooks
 from .adapters.base import get_adapter
 from .classify import RULES_VERSION, Classification, classify
 from .match import matches, sort_key
@@ -23,7 +21,7 @@ from .models import AppConfig, Job
 from .notifier import DiscordHTTPError, DiscordNotifier, MAX_EMBEDS_PER_MESSAGE, alert_embed
 from .security import redact
 
-MAX_ALERTS_PER_USER_PER_CYCLE = 30
+MAX_ALERTS_PER_SUBSCRIBER_PER_CYCLE = 30
 STALE_REASON = "stale (older than freshness window at ingest)"
 
 
@@ -73,7 +71,7 @@ def pace(politeness) -> None:
 
 def ingest(
     cfg: AppConfig,
-    conn: sqlite3.Connection,
+    conn: db.Conn,
     errors: list[str],
     companies: list,
     *,
@@ -95,6 +93,7 @@ def ingest(
         jobs = dedupe_by_uid(fetch(company, errors))
         if not jobs:
             continue
+        db.touch_postings(conn, [j.uid for j in jobs], now=now)
         for job in db.insert_new_postings(conn, jobs, seen_at=db.to_iso(now)):
             if is_fresh(job, cfg.criteria.freshness_minutes, now=now):
                 fresh_new.append(job)
@@ -111,7 +110,7 @@ def ingest(
 
 
 def classify_new(
-    cfg: AppConfig, conn: sqlite3.Connection, jobs: list[Job]
+    cfg: AppConfig, conn: db.Conn, jobs: list[Job]
 ) -> list[tuple[Job, Classification]]:
     out = []
     for job in jobs:
@@ -132,25 +131,25 @@ class Candidate:
     location_tier: int
 
 
-def match_users(
+def match_subscribers(
     cfg: AppConfig,
-    conn: sqlite3.Connection,
-    users: list[db.UserRecord] | None = None,
+    conn: db.Conn,
+    subs: list[db.Subscriber] | None = None,
 ) -> dict[int, list[Candidate]]:
-    """Per active user: eligible postings first seen at/after activation that match
-    their prefs and have no pending/sent delivery yet, best-first."""
-    users = db.list_active_users(conn) if users is None else users
+    """Per active subscriber: eligible postings first seen at/after activation that match
+    their countries/levels and are not already sent or in flight, best-first."""
+    subs = db.list_active_subscribers(conn) if subs is None else subs
     result: dict[int, list[Candidate]] = {}
-    for user in users:
-        blocked = db.blocked_uids(conn, user.id)
+    for sub in subs:
+        blocked = db.blocked_uids(conn, sub.id)
         cands: list[Candidate] = []
-        for row in db.candidate_rows(conn, user.activated_at):
+        for row in db.candidate_rows(conn, sub.activated_at or sub.created_at):
             if row["uid"] in blocked:
                 continue
             tags = db.tags_from_row(row)
-            job = db.job_from_row(row)
-            if not matches(user.prefs, tags, company=job.company):
+            if not matches(sub, tags):
                 continue
+            job = db.job_from_row(row)
             cands.append(
                 Candidate(
                     job=job,
@@ -159,12 +158,8 @@ def match_users(
                     location_tier=location_tier(job.location, cfg.location_tiers),
                 )
             )
-        cands.sort(
-            key=lambda c: sort_key(
-                user.prefs, c.job, c.tags, c.company_priority, cfg.location_tiers
-            )
-        )
-        result[user.id] = cands
+        cands.sort(key=lambda c: sort_key(c.location_tier, c.company_priority))
+        result[sub.id] = cands
     return result
 
 
@@ -182,47 +177,44 @@ class DeliverResult:
 
 
 def deliver(
-    conn: sqlite3.Connection,
-    user: db.UserRecord,
+    conn: db.Conn,
+    sub: db.Subscriber,
     candidates: list[Candidate],
     *,
-    env: Mapping[str, str] | None = None,
+    key: str | None = None,
     notifier_factory: Callable[[str], DiscordNotifier] = lambda url: DiscordNotifier(url),
     dry_run: bool = False,
-    cap: int = MAX_ALERTS_PER_USER_PER_CYCLE,
+    cap: int = MAX_ALERTS_PER_SUBSCRIBER_PER_CYCLE,
     log: Callable[[str], None] = print,
 ) -> DeliverResult:
-    """Send one user's alerts (<= `cap` per cycle, 10 embeds per Discord message).
+    """Send one subscriber's alerts (<= `cap` per cycle, 10 embeds per Discord message).
 
-    The webhook URL is read from env[destination.ref]. If that variable is
-    missing (or dry_run is set) this is a DRY RUN: alerts are printed and NO
-    delivery rows are reserved, so they will be sent on a later real run.
-    A Discord 404 means the webhook is gone: the user is disabled.
+    The stored URL is decrypted, re-parsed and the request URL rebuilt from (id, token).
+    dry_run prints alerts and reserves nothing. Discord 404/401 disables the subscriber
+    at once; any other failure counts one failed cycle (5 in a row disables).
+    A missing/wrong JOBHUNT_SECRET_KEY raises crypto.CryptoError (fail fast).
     """
-    env = os.environ if env is None else env
     res = DeliverResult()
     if not candidates:
         return res
     batch = candidates[:cap]
     res.skipped_over_cap = max(0, len(candidates) - cap)
 
-    url = env.get(user.destination.ref, "").strip() if user.destination.kind == "webhook_env" else ""
-    if dry_run or not url:
+    if dry_run:
         res.dry_run = True
-        why = "dry-run" if dry_run else f"{user.destination.ref} not set"
-        log(f"[{why}] user {user.id}: {len(batch)} alert(s) not sent")
+        log(f"[dry-run] subscriber {sub.id}: {len(batch)} alert(s) not sent")
         for c in batch:
             log(f"  - {c.job.company}: {c.job.title} | {c.job.location or '-'} | {c.job.url}")
         return res
 
-    reserved = [c for c in batch if db.reserve_delivery(conn, user.id, c.job.uid)]
+    hook = webhooks.parse(crypto.decrypt_url(sub.webhook_enc, key))
+    reserved = [c for c in batch if db.reserve_delivery(conn, sub.id, c.job.uid)]
     if not reserved:
         return res
-    notifier = notifier_factory(url)
+    notifier = notifier_factory(hook.url)
 
     for i in range(0, len(reserved), MAX_EMBEDS_PER_MESSAGE):
         chunk = reserved[i : i + MAX_EMBEDS_PER_MESSAGE]
-        uids = [c.job.uid for c in chunk]
         embeds = [
             alert_embed(c.job, c.company_priority, c.location_tier, c.tags.level, c.tags.categories)
             for c in chunk
@@ -231,19 +223,23 @@ def deliver(
             notifier.send_embeds(embeds)
         except Exception as exc:  # noqa: BLE001 - classify below, never crash the cycle
             rest = [c.job.uid for c in reserved[i:]]
-            db.mark_failed(conn, user.id, rest)
+            db.mark_failed(conn, sub.id, rest)
             res.failed += len(rest)
             msg = redact(str(exc))
             res.notes.append(msg)
-            if isinstance(exc, DiscordHTTPError) and exc.status_code == 404:
-                db.disable_user(conn, user.id, "discord webhook returned 404 (deleted/invalid)")
+            if isinstance(exc, DiscordHTTPError) and exc.status_code in (401, 404):
+                db.disable_subscriber(
+                    conn, sub.id, f"discord webhook returned {exc.status_code} (deleted/invalid)"
+                )
                 res.disabled = True
-                log(f"user {user.id}: webhook 404 -> user disabled")
+                log(f"subscriber {sub.id}: webhook {exc.status_code} -> disabled")
             else:
-                db.destination_failed(conn, user.destination.id)
-                log(f"user {user.id}: delivery failed: {msg}")
+                res.disabled = db.subscriber_failed(conn, sub.id)
+                log(f"subscriber {sub.id}: delivery failed: {msg}")
+                if res.disabled:
+                    log(f"subscriber {sub.id}: too many failed cycles -> disabled")
             return res
-        db.mark_sent(conn, user.id, uids)
-        db.destination_ok(conn, user.destination.id)
+        db.mark_sent(conn, sub.id, [c.job.uid for c in chunk])
+        db.subscriber_ok(conn, sub.id)
         res.sent += len(chunk)
     return res

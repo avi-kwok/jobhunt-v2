@@ -1,14 +1,17 @@
-"""v2 SQLite schema (WAL) + small data-access helpers.
+"""v2 database: SQLite (default, local/tests) or Postgres (DATABASE_URL), one API.
 
-Portable SQL only: TEXT / INTEGER columns, arrays stored as JSON text,
-timestamps as fixed-width ISO-8601 UTC TEXT (so string comparison == time order).
+Portable SQL only: TEXT / INTEGER columns, arrays as JSON text, booleans as INTEGER,
+timestamps as fixed-width ISO-8601 UTC TEXT (string comparison == time order).
+Only the DDL differs per backend. Queries are written with `?` placeholders; the
+Postgres wrapper translates them to `%s`.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,9 +19,12 @@ from .classify import Classification
 from .models import Job
 
 DEFAULT_DB_PATH = Path("jobhunt_v2.db")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+PENDING_RETRY_AFTER = timedelta(hours=1)
+MAX_FAIL_CYCLES = 5
+RETENTION_DAYS = 90
 
-_SCHEMA = """
+_TABLES = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
@@ -32,7 +38,8 @@ CREATE TABLE IF NOT EXISTS postings (
     location_raw  TEXT,
     posted_at     TEXT,
     posted_note   TEXT,
-    first_seen_at TEXT NOT NULL
+    first_seen_at TEXT NOT NULL,
+    last_seen_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_postings_first_seen ON postings(first_seen_at);
 
@@ -50,45 +57,48 @@ CREATE TABLE IF NOT EXISTS posting_tags (
     rules_version   INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS users (
-    id              INTEGER PRIMARY KEY,
-    discord_user_id TEXT UNIQUE,
-    created_at      TEXT NOT NULL,
-    activated_at    TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'active'
-                    CHECK (status IN ('active', 'paused', 'disabled')),
-    disabled_reason TEXT
-);
-
-CREATE TABLE IF NOT EXISTS destinations (
-    id         INTEGER PRIMARY KEY,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    kind       TEXT NOT NULL,
-    ref        TEXT NOT NULL,
-    last_ok_at TEXT,
-    fail_count INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_destinations_user ON destinations(user_id);
-
-CREATE TABLE IF NOT EXISTS prefs (
-    user_id            INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    levels             TEXT NOT NULL DEFAULT '[]',
-    countries          TEXT NOT NULL DEFAULT '[]',
-    cities             TEXT NOT NULL DEFAULT '[]',
-    remote_ok          INTEGER NOT NULL DEFAULT 1,
-    favorite_companies TEXT NOT NULL DEFAULT '[]',
-    muted_companies    TEXT NOT NULL DEFAULT '[]'
+CREATE TABLE IF NOT EXISTS subscribers (
+    id                  {ID_COL},
+    webhook_hash        TEXT NOT NULL UNIQUE,
+    webhook_enc         TEXT NOT NULL,
+    manage_token_hash   TEXT UNIQUE,
+    status              TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'active', 'paused', 'disabled')),
+    disabled_reason     TEXT,
+    countries           TEXT NOT NULL DEFAULT '["CA","US"]',
+    levels              TEXT NOT NULL DEFAULT '["internship","coop"]',
+    created_at          TEXT NOT NULL,
+    activated_at        TEXT,
+    last_ok_at          TEXT,
+    fail_count          INTEGER NOT NULL DEFAULT 0,
+    verify_count        INTEGER NOT NULL DEFAULT 0,
+    verify_window_start TEXT
 );
 
 CREATE TABLE IF NOT EXISTS deliveries (
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    uid     TEXT NOT NULL REFERENCES postings(uid) ON DELETE CASCADE,
-    status  TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
-    sent_at TEXT,
-    PRIMARY KEY (user_id, uid)
+    subscriber_id {SUB_FK} NOT NULL REFERENCES subscribers(id) ON DELETE CASCADE,
+    uid           TEXT NOT NULL REFERENCES postings(uid) ON DELETE CASCADE,
+    status        TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    updated_at    TEXT NOT NULL,
+    sent_at       TEXT,
+    PRIMARY KEY (subscriber_id, uid)
 );
 CREATE INDEX IF NOT EXISTS idx_deliveries_sent_at ON deliveries(sent_at);
+
+CREATE TABLE IF NOT EXISTS rate_limits (
+    key_hash     TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    count        INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (key_hash, window_start)
+);
 """
+
+_SCHEMA_SQLITE = _TABLES.format(ID_COL="INTEGER PRIMARY KEY", SUB_FK="INTEGER")
+_SCHEMA_PG = _TABLES.format(
+    ID_COL="BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY", SUB_FK="BIGINT"
+)
+DATA_TABLES = ("rate_limits", "deliveries", "subscribers", "posting_tags", "postings")
 
 
 def utcnow_iso() -> str:
@@ -103,40 +113,140 @@ def to_iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat(timespec="microseconds")
 
 
-def connect(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    """Open (creating if needed) the v2 database with WAL + FKs + 30s busy timeout."""
-    conn = sqlite3.connect(str(path), timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.executescript(_SCHEMA)
-    if conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 0:
-        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
-    conn.commit()
+# ---- connections ----------------------------------------------------------
+
+
+class Row(tuple):
+    """Result row addressable by index or column name (Postgres side)."""
+
+    _names: tuple[str, ...] = ()
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            try:
+                return tuple.__getitem__(self, self._names.index(key))
+            except ValueError:
+                raise KeyError(key) from None
+        return tuple.__getitem__(self, key)
+
+    def keys(self):
+        return list(self._names)
+
+
+def _pg_row_factory(cursor):
+    names = tuple(c.name for c in cursor.description) if cursor.description else ()
+    cls = type("Row", (Row,), {"_names": names})
+    return lambda values: cls(values)
+
+
+class Conn:
+    """Thin wrapper giving psycopg the sqlite3 calling convention (`?`, execute on conn)."""
+
+    def __init__(self, raw, backend: str):
+        self.raw = raw
+        self.backend = backend
+
+    @property
+    def is_postgres(self) -> bool:
+        return self.backend == "postgres"
+
+    def execute(self, sql: str, params=()):
+        if self.is_postgres:
+            sql = sql.replace("?", "%s")
+        return self.raw.execute(sql, params)
+
+    def executemany(self, sql: str, seq):
+        if self.is_postgres:
+            sql = sql.replace("?", "%s")
+            cur = self.raw.cursor()
+            cur.executemany(sql, seq)
+            return cur
+        return self.raw.executemany(sql, seq)
+
+    def commit(self) -> None:
+        self.raw.commit()
+
+    def rollback(self) -> None:
+        self.raw.rollback()
+
+    def close(self) -> None:
+        self.raw.close()
+
+
+def is_postgres_url(target) -> bool:
+    return isinstance(target, str) and target.startswith(("postgres://", "postgresql://"))
+
+
+def connect(target: Path | str | None = None) -> Conn:
+    """Open the database and ensure the schema.
+
+    `target`: a postgres URL, a SQLite path, or None (DATABASE_URL if set, else the
+    default SQLite file).
+    """
+    if target is None:
+        target = os.environ.get("DATABASE_URL") or DEFAULT_DB_PATH
+    if is_postgres_url(target):
+        import psycopg
+
+        # prepare_threshold=None: Supabase's transaction pooler has no prepared statements.
+        raw = psycopg.connect(str(target), prepare_threshold=None, row_factory=_pg_row_factory)
+        conn = Conn(raw, "postgres")
+    else:
+        raw = sqlite3.connect(str(target), timeout=30)
+        raw.row_factory = sqlite3.Row
+        raw.execute("PRAGMA busy_timeout=30000")
+        raw.execute("PRAGMA journal_mode=WAL")
+        raw.execute("PRAGMA foreign_keys=ON")
+        conn = Conn(raw, "sqlite")
+    init_schema(conn)
     return conn
 
 
-def schema_version(conn: sqlite3.Connection) -> int:
+def init_schema(conn: Conn) -> None:
+    """Create tables if missing and record the schema version. Idempotent."""
+    if conn.is_postgres:
+        have = conn.execute("SELECT to_regclass('schema_version') IS NOT NULL").fetchone()[0]
+        if have and (schema_version(conn) or 0) >= SCHEMA_VERSION:
+            conn.rollback()
+            return
+        for stmt in _SCHEMA_PG.split(";"):
+            if stmt.strip():
+                conn.execute(stmt)
+    else:
+        conn.raw.executescript(_SCHEMA_SQLITE)
+    if conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 0:
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+    conn.commit()
+
+
+def schema_version(conn: Conn) -> int:
     return conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+
+
+def truncate_all(conn: Conn) -> None:
+    """Empty every data table (tests / dev reset)."""
+    for t in DATA_TABLES:
+        conn.execute(f"DELETE FROM {t}")
+    conn.commit()
 
 
 # ---- postings / tags ------------------------------------------------------
 
 
 def insert_new_postings(
-    conn: sqlite3.Connection, jobs: list[Job], seen_at: str | None = None
+    conn: Conn, jobs: list[Job], seen_at: str | None = None
 ) -> list[Job]:
     """Insert postings not yet stored; return only those that were new."""
     seen_at = seen_at or utcnow_iso()
     new: list[Job] = []
     for job in jobs:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO postings (uid, source, company, title, url, "
-            "location_raw, posted_at, posted_note, first_seen_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO postings (uid, source, company, title, url, "
+            "location_raw, posted_at, posted_note, first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT (uid) DO NOTHING",
             (
                 job.uid, job.source, job.company, job.title, job.url, job.location,
-                to_iso(job.posted_at) if job.posted_at else None, job.posted_note, seen_at,
+                to_iso(job.posted_at) if job.posted_at else None, job.posted_note, seen_at, seen_at,
             ),
         )
         if cur.rowcount:
@@ -145,8 +255,23 @@ def insert_new_postings(
     return new
 
 
+def touch_postings(conn: Conn, uids: list[str], now: datetime | None = None) -> None:
+    """Mark postings still on the board (at most one write per posting per day)."""
+    now = now or datetime.now(timezone.utc)
+    stamp, day_ago = to_iso(now), to_iso(now - timedelta(days=1))
+    for i in range(0, len(uids), 500):
+        chunk = uids[i : i + 500]
+        marks = ",".join("?" * len(chunk))
+        conn.execute(
+            f"UPDATE postings SET last_seen_at=? WHERE uid IN ({marks}) "
+            "AND (last_seen_at IS NULL OR last_seen_at < ?)",
+            (stamp, *chunk, day_ago),
+        )
+    conn.commit()
+
+
 def upsert_tags(
-    conn: sqlite3.Connection, uid: str, cls: Classification, classified_at: str | None = None
+    conn: Conn, uid: str, cls: Classification, classified_at: str | None = None
 ) -> None:
     conn.execute(
         "INSERT INTO posting_tags (uid, eligible, reject_reason, categories, level, countries, "
@@ -166,7 +291,7 @@ def upsert_tags(
     conn.commit()
 
 
-def tags_from_row(row: sqlite3.Row) -> Classification:
+def tags_from_row(row) -> Classification:
     """Rebuild a Classification from a posting_tags row (or a join containing its columns)."""
     return Classification(
         eligible=bool(row["eligible"]),
@@ -181,7 +306,7 @@ def tags_from_row(row: sqlite3.Row) -> Classification:
     )
 
 
-def job_from_row(row: sqlite3.Row) -> Job:
+def job_from_row(row) -> Job:
     """Rebuild a (description-less) Job from a postings row."""
     posted = datetime.fromisoformat(row["posted_at"]) if row["posted_at"] else None
     return Job(
@@ -196,147 +321,125 @@ def job_from_row(row: sqlite3.Row) -> Job:
     )
 
 
-# ---- users ----------------------------------------------------------------
+# ---- subscribers ----------------------------------------------------------
 
 
 @dataclass
-class Prefs:
-    levels: list[str] = field(default_factory=lambda: ["internship", "coop"])
-    countries: list[str] = field(default_factory=lambda: ["CA", "US"])
-    cities: list[str] = field(default_factory=list)
-    remote_ok: bool = True
-    favorite_companies: list[str] = field(default_factory=list)
-    muted_companies: list[str] = field(default_factory=list)
-
-
-@dataclass
-class Destination:
+class Subscriber:
     id: int
-    kind: str
-    ref: str
+    status: str
+    countries: list[str]
+    levels: list[str]
+    webhook_enc: str
+    created_at: str
+    activated_at: str | None = None
+    disabled_reason: str | None = None
     last_ok_at: str | None = None
     fail_count: int = 0
 
 
-@dataclass
-class UserRecord:
-    id: int
-    discord_user_id: str | None
-    activated_at: str
-    status: str
-    prefs: Prefs
-    destination: Destination
-    disabled_reason: str | None = None
-
-
-def create_user(
-    conn: sqlite3.Connection,
-    prefs: Prefs,
-    destination_kind: str,
-    destination_ref: str,
-    *,
-    discord_user_id: str | None = None,
-    status: str = "active",
-    activated_at: str | None = None,
-) -> int:
-    now = utcnow_iso()
-    cur = conn.execute(
-        "INSERT INTO users (discord_user_id, created_at, activated_at, status) VALUES (?,?,?,?)",
-        (discord_user_id, now, activated_at or now, status),
-    )
-    uid = cur.lastrowid
-    conn.execute(
-        "INSERT INTO prefs (user_id, levels, countries, cities, remote_ok, favorite_companies, "
-        "muted_companies) VALUES (?,?,?,?,?,?,?)",
-        (
-            uid, json.dumps(prefs.levels), json.dumps(prefs.countries), json.dumps(prefs.cities),
-            int(prefs.remote_ok), json.dumps(prefs.favorite_companies),
-            json.dumps(prefs.muted_companies),
-        ),
-    )
-    conn.execute(
-        "INSERT INTO destinations (user_id, kind, ref) VALUES (?,?,?)",
-        (uid, destination_kind, destination_ref),
-    )
-    conn.commit()
-    return uid
-
-
-def find_user_by_destination(
-    conn: sqlite3.Connection, kind: str, ref: str
-) -> int | None:
-    row = conn.execute(
-        "SELECT user_id FROM destinations WHERE kind=? AND ref=? ORDER BY user_id LIMIT 1",
-        (kind, ref),
-    ).fetchone()
-    return row["user_id"] if row else None
-
-
-def _user_from_row(row: sqlite3.Row) -> UserRecord:
-    return UserRecord(
-        id=row["id"],
-        discord_user_id=row["discord_user_id"],
-        activated_at=row["activated_at"],
-        status=row["status"],
-        disabled_reason=row["disabled_reason"],
-        prefs=Prefs(
-            levels=json.loads(row["levels"]),
-            countries=json.loads(row["countries"]),
-            cities=json.loads(row["cities"]),
-            remote_ok=bool(row["remote_ok"]),
-            favorite_companies=json.loads(row["favorite_companies"]),
-            muted_companies=json.loads(row["muted_companies"]),
-        ),
-        destination=Destination(
-            id=row["dest_id"], kind=row["kind"], ref=row["ref"],
-            last_ok_at=row["last_ok_at"], fail_count=row["fail_count"],
-        ),
-    )
-
-
-_USER_SELECT = (
-    "SELECT u.id, u.discord_user_id, u.activated_at, u.status, u.disabled_reason, "
-    "p.levels, p.countries, p.cities, p.remote_ok, p.favorite_companies, p.muted_companies, "
-    "d.id AS dest_id, d.kind, d.ref, d.last_ok_at, d.fail_count "
-    "FROM users u JOIN prefs p ON p.user_id = u.id "
-    "JOIN destinations d ON d.id = (SELECT MIN(id) FROM destinations WHERE user_id = u.id) "
+_SUB_COLS = (
+    "id, status, countries, levels, webhook_enc, created_at, activated_at, "
+    "disabled_reason, last_ok_at, fail_count"
 )
 
 
-def list_users(conn: sqlite3.Connection, status: str | None = None) -> list[UserRecord]:
-    sql = _USER_SELECT + ("WHERE u.status = ? " if status else "") + "ORDER BY u.id"
-    rows = conn.execute(sql, (status,) if status else ()).fetchall()
-    return [_user_from_row(r) for r in rows]
+def _sub_from_row(r) -> Subscriber:
+    return Subscriber(
+        id=r["id"], status=r["status"], countries=json.loads(r["countries"]),
+        levels=json.loads(r["levels"]), webhook_enc=r["webhook_enc"],
+        created_at=r["created_at"], activated_at=r["activated_at"],
+        disabled_reason=r["disabled_reason"], last_ok_at=r["last_ok_at"],
+        fail_count=r["fail_count"],
+    )
 
 
-def list_active_users(conn: sqlite3.Connection) -> list[UserRecord]:
-    """Active users that have prefs and a destination."""
-    return list_users(conn, status="active")
+def add_subscriber(
+    conn: Conn,
+    webhook_hash: str,
+    webhook_enc: str,
+    countries: list[str],
+    levels: list[str],
+    *,
+    status: str = "pending",
+    manage_token_hash: str | None = None,
+) -> int | None:
+    """Insert a subscriber. Returns the new id, or None if that webhook already exists."""
+    now = utcnow_iso()
+    row = conn.execute(
+        "INSERT INTO subscribers (webhook_hash, webhook_enc, manage_token_hash, status, "
+        "countries, levels, created_at, activated_at) VALUES (?,?,?,?,?,?,?,?) "
+        "ON CONFLICT (webhook_hash) DO NOTHING RETURNING id",
+        (
+            webhook_hash, webhook_enc, manage_token_hash, status, json.dumps(countries),
+            json.dumps(levels), now, now if status == "active" else None,
+        ),
+    ).fetchone()
+    conn.commit()
+    return row[0] if row else None
 
 
-def disable_user(conn: sqlite3.Connection, user_id: int, reason: str) -> None:
+def get_subscriber(conn: Conn, sub_id: int) -> Subscriber | None:
+    r = conn.execute(f"SELECT {_SUB_COLS} FROM subscribers WHERE id=?", (sub_id,)).fetchone()
+    return _sub_from_row(r) if r else None
+
+
+def list_subscribers(conn: Conn, status: str | None = None) -> list[Subscriber]:
+    sql = f"SELECT {_SUB_COLS} FROM subscribers " + ("WHERE status=? " if status else "")
+    rows = conn.execute(sql + "ORDER BY id", (status,) if status else ()).fetchall()
+    return [_sub_from_row(r) for r in rows]
+
+
+def list_active_subscribers(conn: Conn) -> list[Subscriber]:
+    return list_subscribers(conn, "active")
+
+
+def activate_subscriber(conn: Conn, sub_id: int) -> bool:
+    cur = conn.execute(
+        "UPDATE subscribers SET status='active', activated_at=?, fail_count=0, "
+        "disabled_reason=NULL WHERE id=? AND status IN ('pending','paused')",
+        (utcnow_iso(), sub_id),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def disable_subscriber(conn: Conn, sub_id: int, reason: str) -> None:
     conn.execute(
-        "UPDATE users SET status='disabled', disabled_reason=? WHERE id=?", (reason, user_id)
+        "UPDATE subscribers SET status='disabled', disabled_reason=? WHERE id=?",
+        (reason, sub_id),
     )
     conn.commit()
 
 
-def destination_ok(conn: sqlite3.Connection, dest_id: int) -> None:
+def remove_subscriber(conn: Conn, sub_id: int) -> bool:
+    cur = conn.execute("DELETE FROM subscribers WHERE id=?", (sub_id,))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def subscriber_ok(conn: Conn, sub_id: int) -> None:
     conn.execute(
-        "UPDATE destinations SET last_ok_at=?, fail_count=0 WHERE id=?", (utcnow_iso(), dest_id)
+        "UPDATE subscribers SET last_ok_at=?, fail_count=0 WHERE id=?", (utcnow_iso(), sub_id)
     )
     conn.commit()
 
 
-def destination_failed(conn: sqlite3.Connection, dest_id: int) -> None:
-    conn.execute("UPDATE destinations SET fail_count = fail_count + 1 WHERE id=?", (dest_id,))
+def subscriber_failed(conn: Conn, sub_id: int, max_fails: int = MAX_FAIL_CYCLES) -> bool:
+    """Count one failed cycle; disable at `max_fails` consecutive. True if now disabled."""
+    conn.execute("UPDATE subscribers SET fail_count = fail_count + 1 WHERE id=?", (sub_id,))
+    n = conn.execute("SELECT fail_count FROM subscribers WHERE id=?", (sub_id,)).fetchone()[0]
     conn.commit()
+    if n >= max_fails:
+        disable_subscriber(conn, sub_id, f"{n} consecutive failed delivery cycles")
+        return True
+    return False
 
 
 # ---- candidates + deliveries ----------------------------------------------
 
 
-def candidate_rows(conn: sqlite3.Connection, activated_at: str) -> list[sqlite3.Row]:
+def candidate_rows(conn: Conn, activated_at: str) -> list:
     """Eligible postings first seen at/after `activated_at`, joined with their tags."""
     return conn.execute(
         "SELECT p.*, t.eligible, t.reject_reason, t.categories, t.level, t.countries, "
@@ -347,78 +450,104 @@ def candidate_rows(conn: sqlite3.Connection, activated_at: str) -> list[sqlite3.
     ).fetchall()
 
 
-def delivery_status(conn: sqlite3.Connection, user_id: int, uid: str) -> str | None:
+def _stale_cutoff(now: datetime | None = None) -> str:
+    return to_iso((now or datetime.now(timezone.utc)) - PENDING_RETRY_AFTER)
+
+
+def delivery_status(conn: Conn, sub_id: int, uid: str) -> str | None:
     row = conn.execute(
-        "SELECT status FROM deliveries WHERE user_id=? AND uid=?", (user_id, uid)
+        "SELECT status FROM deliveries WHERE subscriber_id=? AND uid=?", (sub_id, uid)
     ).fetchone()
-    return row["status"] if row else None
+    return row[0] if row else None
 
 
-def blocked_uids(conn: sqlite3.Connection, user_id: int) -> set[str]:
-    """Uids this user already has a pending or sent delivery for (failed ones may retry)."""
+def blocked_uids(conn: Conn, sub_id: int, now: datetime | None = None) -> set[str]:
+    """Uids already sent, or in flight (pending < 1h). Failed / stale pending may retry."""
     rows = conn.execute(
-        "SELECT uid FROM deliveries WHERE user_id=? AND status IN ('pending','sent')",
-        (user_id,),
+        "SELECT uid FROM deliveries WHERE subscriber_id=? AND "
+        "(status='sent' OR (status='pending' AND updated_at >= ?))",
+        (sub_id, _stale_cutoff(now)),
     ).fetchall()
-    return {r["uid"] for r in rows}
+    return {r[0] for r in rows}
 
 
-def reserve_delivery(conn: sqlite3.Connection, user_id: int, uid: str) -> bool:
-    """Atomically claim (user, uid). True if this caller now owns the send.
+def reserve_delivery(
+    conn: Conn, sub_id: int, uid: str, now: datetime | None = None
+) -> bool:
+    """Atomically claim (subscriber, uid). True if this caller now owns the send.
 
-    INSERT OR IGNORE a 'pending' row; if a 'failed' row exists it is flipped back
-    to 'pending' (retry). A 'sent' or in-flight 'pending' row is never re-claimed.
+    New row -> 'pending'. An existing 'failed' row, or a 'pending' row not touched for
+    over an hour (crashed run), is re-claimed. 'sent' and fresh 'pending' never are.
     """
+    ts = to_iso(now) if now else utcnow_iso()
     cur = conn.execute(
-        "INSERT OR IGNORE INTO deliveries (user_id, uid, status) VALUES (?,?,'pending')",
-        (user_id, uid),
+        "INSERT INTO deliveries (subscriber_id, uid, status, attempts, updated_at) "
+        "VALUES (?,?,'pending',1,?) ON CONFLICT (subscriber_id, uid) DO NOTHING",
+        (sub_id, uid, ts),
     )
     reserved = cur.rowcount == 1
     if not reserved:
         cur = conn.execute(
-            "UPDATE deliveries SET status='pending' "
-            "WHERE user_id=? AND uid=? AND status='failed'",
-            (user_id, uid),
+            "UPDATE deliveries SET status='pending', attempts = attempts + 1, updated_at=? "
+            "WHERE subscriber_id=? AND uid=? AND "
+            "(status='failed' OR (status='pending' AND updated_at < ?))",
+            (ts, sub_id, uid, _stale_cutoff(now)),
         )
         reserved = cur.rowcount == 1
     conn.commit()
     return reserved
 
 
-def mark_sent(conn: sqlite3.Connection, user_id: int, uids: list[str]) -> None:
+def mark_sent(conn: Conn, sub_id: int, uids: list[str]) -> None:
     now = utcnow_iso()
     conn.executemany(
-        "UPDATE deliveries SET status='sent', sent_at=? WHERE user_id=? AND uid=?",
-        [(now, user_id, u) for u in uids],
+        "UPDATE deliveries SET status='sent', sent_at=?, updated_at=? "
+        "WHERE subscriber_id=? AND uid=?",
+        [(now, now, sub_id, u) for u in uids],
     )
     conn.commit()
 
 
-def mark_failed(conn: sqlite3.Connection, user_id: int, uids: list[str]) -> None:
+def mark_failed(conn: Conn, sub_id: int, uids: list[str]) -> None:
+    now = utcnow_iso()
     conn.executemany(
-        "UPDATE deliveries SET status='failed' WHERE user_id=? AND uid=?",
-        [(user_id, u) for u in uids],
+        "UPDATE deliveries SET status='failed', updated_at=? WHERE subscriber_id=? AND uid=?",
+        [(now, sub_id, u) for u in uids],
     )
     conn.commit()
 
 
-# ---- stats ----------------------------------------------------------------
+# ---- retention + stats ----------------------------------------------------
 
 
-def stats_24h(conn: sqlite3.Connection) -> dict[str, int]:
-    """Counts for the heartbeat: totals + postings ingested / eligible / alerts sent in 24h."""
+def prune_postings(conn: Conn, days: int = RETENTION_DAYS, now: datetime | None = None) -> int:
+    """Delete postings first seen more than `days` ago AND not seen on the board for `days`
+    (tags and deliveries cascade). Still-open postings are kept so they are never re-alerted."""
+    cutoff = to_iso((now or datetime.now(timezone.utc)) - timedelta(days=days))
+    cur = conn.execute(
+        "DELETE FROM postings WHERE first_seen_at < ? "
+        "AND (last_seen_at IS NULL OR last_seen_at < ?)",
+        (cutoff, cutoff),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+def stats_24h(conn: Conn) -> dict[str, int]:
+    """Heartbeat numbers: active subscribers, postings and deliveries in the last 24h."""
     since = to_iso(datetime.now(timezone.utc) - timedelta(days=1))
     q = conn.execute
     return {
-        "total": q("SELECT COUNT(*) FROM postings").fetchone()[0],
-        "ingested_24h": q(
-            "SELECT COUNT(*) FROM postings WHERE first_seen_at >= ?", (since,)
+        "active_subscribers": q(
+            "SELECT COUNT(*) FROM subscribers WHERE status='active'"
         ).fetchone()[0],
-        "eligible_24h": q(
-            "SELECT COUNT(*) FROM postings p JOIN posting_tags t ON t.uid = p.uid "
-            "WHERE t.eligible = 1 AND p.first_seen_at >= ?", (since,)
+        "postings_24h": q(
+            "SELECT COUNT(*) FROM postings WHERE first_seen_at >= ?", (since,)
         ).fetchone()[0],
         "sent_24h": q(
             "SELECT COUNT(*) FROM deliveries WHERE status='sent' AND sent_at >= ?", (since,)
+        ).fetchone()[0],
+        "failed_24h": q(
+            "SELECT COUNT(*) FROM deliveries WHERE status='failed' AND updated_at >= ?", (since,)
         ).fetchone()[0],
     }

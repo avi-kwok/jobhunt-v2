@@ -76,7 +76,7 @@ Current lines:
 | A scan seems stuck | `pgrep -fl "jobhunt scan"` → check age `ps -o etime= -p <pid>` → `kill <pid>` if hours old. (flock+timeout 1800 should auto-prevent this.) |
 | Scans never fire | Confirm `crontab -l` has the scan line; `tail logs/cron.log`; instance Running. |
 | Stale lock blocks scans | Only if NO scan is running: `rm -f /tmp/jobhunt.lock` |
-| No Discord alerts | Check `.env` has `DISCORD_WEBHOOK_URL`; run `jobhunt heartbeat` to test the webhook; grep `logs/cron.log` for notify errors. |
+| No Discord alerts | Check `.env` has `JOBHUNT_SECRET_KEY` and `jobhunt subscriber list` shows active subscribers (disabled ones have a reason); run `jobhunt heartbeat` to test `ADMIN_WEBHOOK_URL`; grep `logs/cron.log` for notify errors. |
 | "No such command" | The box is on old code — re-run the §4 rsync + setup.sh. |
 | `config.yaml not found` | You're not in `~/jobhunt` — `cd ~/jobhunt` first. |
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from datetime import timezone
 from typing import Protocol, runtime_checkable
 
@@ -123,17 +122,17 @@ def alert_embed(
 class DiscordNotifier:
     """Posts matches as rich embeds to a Discord webhook, best-sorted and batched.
 
-    Pass `webhook_url` explicitly for per-user delivery (v2). With no argument it
-    falls back to the DISCORD_WEBHOOK_URL env var (v1 heartbeat behaviour).
+    `webhook_url` is always passed explicitly (built from a parsed webhook); there is
+    deliberately no environment fallback, so alerts can never reach the wrong channel.
     """
 
     def __init__(self, webhook_url: str | None = None, client: httpx.Client | None = None):
-        self.webhook_url = webhook_url or os.environ.get("DISCORD_WEBHOOK_URL")
+        self.webhook_url = webhook_url
         self._client = client
 
     def _post(self, embeds: list[dict]) -> None:
         if not self.webhook_url:
-            raise RuntimeError("DISCORD_WEBHOOK_URL is not set")  # no secret to leak
+            raise RuntimeError("webhook URL is not set")  # no secret to leak
         client = self._client or httpx.Client(timeout=20.0)
         try:
             resp = client.post(self.webhook_url, json={"embeds": embeds})
