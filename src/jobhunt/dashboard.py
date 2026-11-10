@@ -44,7 +44,39 @@ def _table(head: list[str], rows: list[list]) -> str:
     return f"<table><tr>{th}</tr>{body}</table>"
 
 
-def render_page(conn, last_cron: str, last_scan: str) -> str:
+def _scan_sections(last_run: dict | None) -> list[str]:
+    """'Last scan' + 'Hosts' + slowest companies, from logs/last_run.json (all escaped)."""
+    if not last_run or "hosts" not in last_run:
+        return ["<h2>Last scan</h2><p>No fetch measurements yet.</p>"]
+    g = lambda k, d=0: last_run.get(k, d)  # noqa: E731
+    out = [
+        "<h2>Last scan</h2>",
+        _table(
+            ["Duration (s)", "Ingest (s)", "Scanned", "Deferred", "Errored", "Deadline hit",
+             "Breaker-tripped hosts"],
+            [[g("total_seconds"), g("ingest_seconds"), g("companies_scanned"),
+              g("companies_deferred"), g("companies_errored"),
+              "yes" if g("deadline_hit", False) else "no",
+              ", ".join(map(str, g("breaker_hosts", []))) or "-"]],
+        ),
+        "<h2>Hosts</h2>",
+    ]
+    rows = [
+        [h, v.get("requests", 0), v.get("429", 0), v.get("403", 0), v.get("5xx", 0),
+         v.get("retries", 0), v.get("retry_after_honored", 0), v.get("skipped_by_breaker", 0)]
+        for h, v in sorted((last_run.get("hosts") or {}).items())
+    ]
+    out.append(_table(["Host", "Requests", "429", "403", "5xx", "Retries", "Retry-After honored",
+                       "Breaker skips"], rows))
+    slow = (last_run.get("slowest_companies") or [])[:10]
+    out.append("<h2>Slowest companies</h2>")
+    out.append(_table(["Company", "Host", "Seconds", "Jobs", "Error"],
+                      [[c.get("name", "?"), c.get("host", "?"), c.get("seconds", 0),
+                        c.get("jobs", 0), c.get("error") or "-"] for c in slow]))
+    return out
+
+
+def render_page(conn, last_cron: str, last_scan: str, last_run: dict | None = None) -> str:
     counts = v2db.subscriber_status_counts(conn)
     tot = v2db.totals(conn)
     days = v2db.daily_activity(conn, 14)
@@ -53,6 +85,7 @@ def render_page(conn, last_cron: str, last_scan: str) -> str:
         "<!doctype html><html lang=en><meta charset=utf-8><title>jobhunt admin</title>",
         f"<style>{_CSS}</style><h1>jobhunt admin</h1>",
         f"<p>Last cron fire: {escape(last_cron)}<br>Last completed scan: {escape(last_scan)}</p>",
+        *_scan_sections(last_run),
         "<h2>Totals</h2>",
         _table(["Postings stored", "Active subscribers", "Deliveries sent (all time)"],
                [[tot["postings"], counts["active"], tot["sent"]]]),

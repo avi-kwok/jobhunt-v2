@@ -189,7 +189,7 @@ def test_scan_wrong_worker_key_disables_nobody(tmp_path, monkeypatch):
 def test_scan_error_text_with_markup_does_not_crash(tmp_path, monkeypatch):
     path, _ = _scan_setup(tmp_path, monkeypatch, n=1)
     monkeypatch.setattr(cli.pipeline, "ingest",
-                        lambda cfg, conn, errors, resolved: errors.append("board boom [/x] [red]") or [])
+                        lambda cfg, conn, errors, resolved, **kw: errors.append("board boom [/x] [red]") or [])
     r = runner.invoke(cli.app, ["scan", "--db", path, "--force", "--no-jitter"])
     assert r.exit_code == 0, r.output
     assert "[/x]" in r.output

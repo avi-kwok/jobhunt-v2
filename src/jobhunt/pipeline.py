@@ -12,12 +12,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
 
-from . import crypto, db, webhooks
+from . import crypto, db, scheduler, webhooks
+from .adapters import base
 from .adapters.base import get_adapter
 from .classify import RULES_VERSION, Classification, classify
 from .match import matches, sort_key
 from .matcher import dedupe_by_uid, is_fresh, location_tier
-from .models import AppConfig, Job
+from .models import AppConfig, Job, PolitenessConfig
 from .notifier import DiscordHTTPError, DiscordNotifier, MAX_EMBEDS_PER_MESSAGE, alert_embed
 from .security import redact
 
@@ -38,7 +39,9 @@ def fetch_company(company, errors: list[str]) -> list[Job]:
         finally:
             adapter.close()
     except Exception as exc:  # noqa: BLE001 - collect, never abort the run
-        errors.append(f"{company.name} ({company.ats}): {exc}")
+        err = scheduler.FetchError(f"{company.name} ({company.ats}): {exc}")
+        err.error_class = scheduler.error_class_of(exc)
+        errors.append(err)
         return []
 
 
@@ -60,10 +63,10 @@ def order_companies(companies: list, politeness) -> list:
     return out
 
 
-def pace(politeness) -> None:
-    """Random pause between company fetches to spread load (if enabled)."""
-    if politeness and politeness.enabled and politeness.company_delay_max > 0:
-        time.sleep(random.uniform(politeness.company_delay_min, politeness.company_delay_max))
+def deferred_first(companies: list, deferred: list[str]) -> list:
+    """Companies the previous scan did not get to (deferred) go first; order is otherwise kept."""
+    names = set(deferred)
+    return [c for c in companies if c.name in names] + [c for c in companies if c.name not in names]
 
 
 # ---- stage 1: ingest ------------------------------------------------------
@@ -76,28 +79,47 @@ def ingest(
     companies: list,
     *,
     fetch: Callable[[object, list[str]], list[Job]] = fetch_company,
-    pace_fn: Callable[[object], None] = pace,
     now: datetime | None = None,
+    report: scheduler.ScanReport | None = None,
+    deadline_seconds: float | None = None,
 ) -> list[Job]:
-    """Fetch every company, store postings not seen before, return the new FRESH ones.
+    """Fetch every company concurrently, store postings not seen before, return the new FRESH ones.
 
-    Stale new postings (outside criteria.freshness_minutes) are stored and tagged
-    ineligible ("stale") immediately, so they are never delivered; only fresh new
-    Jobs are returned for classification.
+    Fetching is scheduled per API host (see scheduler.py); this (main) thread does every DB
+    write, one commit batch per company as it finishes. Stale new postings (outside
+    criteria.freshness_minutes) are stored and tagged ineligible ("stale") immediately, so
+    they are never delivered; only fresh new Jobs are returned for classification (in
+    `companies` order, whatever order the fetches finished in).
+    `deadline_seconds` defaults to politeness.scan_deadline_seconds. `report`, if given, is
+    filled with timings, host stats and the deferred company names.
     """
     now = now or datetime.now(timezone.utc)
-    fresh_new: list[Job] = []
-    for idx, company in enumerate(companies):
-        if idx:
-            pace_fn(cfg.politeness)
-        jobs = dedupe_by_uid(fetch(company, errors))
+    pol = cfg.politeness or PolitenessConfig(enabled=False)
+    report = report if report is not None else scheduler.ScanReport()
+    if deadline_seconds is None:
+        deadline_seconds = pol.scan_deadline_seconds
+    stats = base.begin_scan()
+    t0 = time.monotonic()
+    fresh_by_idx: dict[int, list[Job]] = {}
+    for out in scheduler.fetch_concurrently(
+        companies, pol, fetch, report, deadline_seconds=deadline_seconds
+    ):
+        errors.extend(out.errors)
+        report.scanned += 1
+        report.errored += bool(out.errors)
+        jobs = dedupe_by_uid(out.jobs)
+        report.companies.append({
+            "name": out.company.name, "host": out.host, "seconds": round(out.seconds, 2),
+            "jobs": len(jobs), "error": out.error_class,
+        })
         if not jobs:
             continue
         db.touch_postings(conn, [j.uid for j in jobs], now=now)
         stale: list[tuple[str, Classification]] = []
+        fresh: list[Job] = []
         for job in db.insert_new_postings(conn, jobs, seen_at=db.to_iso(now)):
             if is_fresh(job, cfg.criteria.freshness_minutes, now=now):
-                fresh_new.append(job)
+                fresh.append(job)
             else:
                 stale.append((
                     job.uid,
@@ -105,7 +127,21 @@ def ingest(
                                    rules_version=RULES_VERSION),
                 ))
         db.upsert_tags_many(conn, stale)
-    return fresh_new
+        fresh_by_idx[out.idx] = fresh
+    report.ingest_seconds = time.monotonic() - t0
+    report.hosts = stats.snapshot()
+    for h in report.breaker_hosts:
+        skipped = report.hosts.get(h, {}).get("skipped_by_breaker", 0)
+        errors.append(
+            f"RATE LIMIT: circuit breaker tripped for host {h} (consecutive 429/403): "
+            f"{skipped} company(ies) skipped, deferred to the next scan"
+        )
+    if report.deadline_hit:
+        errors.append(
+            f"SCAN DEADLINE ({deadline_seconds:.0f}s) reached: {len(report.deferred)} "
+            "company(ies) not scanned, deferred to the next scan"
+        )
+    return [j for idx in sorted(fresh_by_idx) for j in fresh_by_idx[idx]]
 
 
 # ---- stage 2: classify ----------------------------------------------------

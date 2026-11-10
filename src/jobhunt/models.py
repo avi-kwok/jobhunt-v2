@@ -110,6 +110,14 @@ class PolitenessConfig(BaseModel):
     startup_jitter_seconds: float = 60.0
     # shuffle companies within each priority tier each run (tiers still ordered)
     shuffle_within_tier: bool = True
+    # concurrent fetch: total worker threads, and the cap on requests in flight per API host
+    # (the company_delay_* pause above is applied PER HOST between requests to that host)
+    max_workers: int = 6
+    per_host_concurrency: int = 2
+    # stop starting new companies after this many seconds; the rest are deferred to the next scan
+    scan_deadline_seconds: float = 1500.0
+    # consecutive 429/403 answers from one host that trip its breaker (rest of its companies deferred)
+    breaker_threshold: int = 3
 
 
 # Imported here (not at top) to avoid a cycle: budget.py has no model deps.

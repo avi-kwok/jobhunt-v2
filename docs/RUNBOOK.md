@@ -199,3 +199,29 @@ Off by default. Web (Vercel) env only; the worker needs nothing.
 - **Rotate**: set a new `INGEST_SECRET`, redeploy, give it to the pipeline. The old one stops working at once.
 - Ingested postings are stored untagged (`source = muse-pipeline`); the next worker scan classifies
   them (up to 500 per scan) and delivers matches. Nothing delivers until the worker runs.
+
+## 9. Rate limits: how to tell and what to do
+
+Scans fetch up to `politeness.max_workers` companies at once, but never more than
+`politeness.per_host_concurrency` per API host (all Greenhouse companies share one host, each Workday
+tenant has its own). The `company_delay_min..max` pause applies per host. A 429 slows that host for the
+rest of the scan (1 in flight, pause doubled); `breaker_threshold` (3) consecutive 429/403 answers trip
+its circuit breaker: its remaining companies are skipped this scan and tried first on the next one.
+`Retry-After` (seconds or date, capped at 60 s) is always honored.
+
+**How to tell**
+- **Dashboard** (section 7): "Last scan" (duration, scanned/deferred/errored, breaker-tripped hosts) and the
+  "Hosts" table (requests, 429, 403, 5xx, retries, Retry-After honored, breaker skips), plus the slowest companies.
+- **Heartbeat**: field "Rate limits (last scan)" = total 429/403 and tripped hosts; the heartbeat turns yellow
+  (🟡) when any host tripped its breaker. Red still means the scheduler is silent.
+- **`logs/worker.log`**: a `RATE LIMIT: circuit breaker tripped for host ...` line and, if the scan hit
+  `scan_deadline_seconds`, a `SCAN DEADLINE ... deferred` line. Raw numbers: `logs/last_run.json`.
+
+**What to change** (`politeness:` in `config.yaml`; defaults apply if a key is missing)
+- A few 429s but no trips: usually fine. Persistent 429s on one host: lower `per_host_concurrency` (2 -> 1)
+  and/or raise `company_delay_min` / `company_delay_max`.
+- Breaker trips every scan on the same host: do the above, and check that host in a browser (403 can mean a
+  block, not a limit). Deferred companies are retried first every scan, so nothing is dropped.
+- Scans keep hitting the deadline (`deadline_hit` in the dashboard): raise `max_workers` (hosts differ) or lower
+  the delays only if the Hosts table shows zero 429s. Keep `scan_deadline_seconds` below `timeout 1800`
+  (and below `schedule.max_run_seconds` minus 2 min if that watchdog is on; the scan clamps itself).

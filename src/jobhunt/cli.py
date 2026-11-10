@@ -16,7 +16,7 @@ from rich.table import Table
 
 from . import adapters  # noqa: F401 - registers adapters
 from . import db as v2db
-from . import crypto, pipeline, security, webhooks
+from . import crypto, pipeline, scheduler, security, webhooks
 from .budget import BudgetExceeded, BudgetGuard  # tailor + `budget` command only
 from .config import load_config
 from .matcher import location_tier
@@ -44,14 +44,17 @@ CRON_LOG_PATH = LOGS_DIR / "worker.log"
 CRON_STALE_MINUTES = 90
 
 
-def _write_last_run_marker(companies: int, new_postings: int, alerts_sent: int) -> None:
-    """Write logs/last_run.json describing the just-completed real scan."""
+def _write_last_run_marker(
+    companies: int, new_postings: int, alerts_sent: int, report: dict | None = None
+) -> None:
+    """Write logs/last_run.json describing the just-completed real scan (+ fetch measurements)."""
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "companies": companies,
         "new_postings": new_postings,
         "alerts_sent": alerts_sent,
+        **(report or {}),
     }
     LAST_RUN_PATH.write_text(json.dumps(payload))
 
@@ -180,7 +183,6 @@ def discover(
 # Kept as module names for callers/tests; the implementations live in pipeline.py.
 _fetch_company = pipeline.fetch_company
 _order_companies = pipeline.order_companies
-_pace = pipeline.pace
 
 
 def _in_quiet_hours(schedule, now=None) -> bool:
@@ -224,6 +226,7 @@ def scan(
     db_path: str = typer.Option(None, "--db", help=DB_HELP),
 ) -> None:
     """v2 pipeline: ingest -> classify -> match subscribers -> deliver. No LLM."""
+    scan_t0 = time.monotonic()
     cfg = load_config()
 
     # Nightly quiet window: scheduled runs self-skip (seed/--force bypass it).
@@ -239,6 +242,9 @@ def scan(
     if max_priority is not None:
         companies = [c for c in companies if c.priority <= max_priority]
     resolved = [c for c in companies if c.ats]
+    # Companies the previous scan could not get to (deadline / rate-limit breaker) go first.
+    prev = _read_last_run() or {}
+    resolved = pipeline.deferred_first(resolved, prev.get("deferred") or [])
 
     # Cheap .env protections (perms, not git-tracked). No API key is needed.
     if not seed:
@@ -269,12 +275,21 @@ def scan(
         time.sleep(delay)
 
     errors: list[str] = []
+    report = scheduler.ScanReport()
+    # The scan's own clock starts at process start (incl. jitter); stay inside the watchdog too.
+    deadline = pol.scan_deadline_seconds if pol else None
+    if cfg.schedule and cfg.schedule.max_run_seconds > 0:
+        deadline = min(deadline or 1e9, max(30.0, cfg.schedule.max_run_seconds - 120.0))
+    if deadline:
+        deadline = max(0.0, deadline - (time.monotonic() - scan_t0))
     log = lambda msg: console.print(msg, markup=False, highlight=False)  # noqa: E731
     totals = {"sent": 0, "failed": 0, "dry": 0, "disabled": 0}
 
     conn = v2db.connect(db_path)
     try:
-        new_jobs = pipeline.ingest(cfg, conn, errors, resolved)
+        new_jobs = pipeline.ingest(
+            cfg, conn, errors, resolved, report=report, deadline_seconds=deadline or None
+        )
         classified = pipeline.classify_new(cfg, conn, new_jobs)
         pipeline.classify_untagged(cfg, conn)  # postings pushed via POST /ingest/posting
         eligible = [j for j, c in classified if c.eligible]
@@ -352,7 +367,10 @@ def scan(
 
     if not seed:
         try:
-            _write_last_run_marker(len(resolved), len(new_jobs), totals["sent"])
+            report.total_seconds = time.monotonic() - scan_t0
+            _write_last_run_marker(
+                len(resolved), len(new_jobs), totals["sent"], report.to_dict()
+            )
         except Exception:  # noqa: BLE001 - liveness marker is best-effort only
             pass
 
@@ -786,7 +804,8 @@ def dashboard(
         conn = v2db.connect(db_path)
         try:
             return render_page(
-                conn, _relative_time(_mtime(CRON_LOG_PATH), now), _relative_time(scan_ts, now)
+                conn, _relative_time(_mtime(CRON_LOG_PATH), now), _relative_time(scan_ts, now),
+                last_run,
             )
         finally:
             conn.close()
@@ -837,6 +856,16 @@ def heartbeat(
             else f"no cron activity in {age_min} min — check the box"
         )
 
+    hosts = (last_run or {}).get("hosts") or {}
+    tripped = list((last_run or {}).get("breaker_hosts") or [])
+    if last_run and "hosts" in last_run:
+        n_rl = sum(int(h.get("429", 0)) + int(h.get("403", 0)) for h in hosts.values())
+        rate_text = f"{n_rl} x 429/403 · {len(tripped)} host(s) tripped"
+    else:
+        rate_text = "n/a"
+    if tripped:
+        status_text += f" (rate limit breaker tripped: {', '.join(tripped)})"
+
     fields = [
         ("Status", status_text),
         ("Last cron fire", _relative_time(cron_mtime, now)),
@@ -848,9 +877,12 @@ def heartbeat(
         ("Postings (24h)", str(counts["postings_24h"])),
         ("Deliveries sent (24h)", str(counts["sent_24h"])),
         ("Deliveries failed (24h)", str(counts["failed_24h"])),
+        ("Rate limits (last scan)", rate_text),
     ]
 
-    if healthy:
+    if healthy and tripped:
+        title, color = "🟡 jobhunt heartbeat — rate limited", 0xF1C40F
+    elif healthy:
         title, color = "🟢 jobhunt heartbeat", 0x2ECC71
     else:
         title, color = "🔴 jobhunt — no recent activity", 0xE74C3C

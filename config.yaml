@@ -127,6 +127,11 @@ politeness:
   company_delay_max: 3.0
   startup_jitter_seconds: 60   # random delay at the start of each scheduled scan
   shuffle_within_tier: true    # vary company order per run (tiers still ordered)
+  # Concurrency is per API host; the delay above is applied per host between requests to it.
+  # max_workers: 6                # total fetch threads
+  # per_host_concurrency: 2       # requests in flight per host (drops to 1 after a 429)
+  # scan_deadline_seconds: 1500   # stop starting companies after this; rest run first next scan
+  # breaker_threshold: 3          # consecutive 429/403 from one host -> skip its rest this scan
 
 # ---------------------------------------------------------------------------
 # NIGHTLY QUIET WINDOW. Scheduled scans self-skip during these hours (the agents

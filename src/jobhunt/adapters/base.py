@@ -5,11 +5,15 @@ from __future__ import annotations
 import os
 import random
 import re
+import threading
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from abc import ABC, abstractmethod
 from html import unescape
 from html.parser import HTMLParser
 from typing import Callable, Type
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -38,6 +42,89 @@ def make_client(timeout: float = DEFAULT_TIMEOUT) -> httpx.Client:
     )
 
 
+RETRY_AFTER_CAP = 60.0  # never sleep longer than this on a server's Retry-After
+
+
+class HostStats:
+    """Thread-safe per-host request counters for ONE scan (reset by begin_scan()).
+
+    Adapters call request_with_retry from worker threads, so every update takes the lock.
+    `consecutive` counts back-to-back 429/403 answers; any other answer resets it (the
+    scheduler's circuit breaker reads it).
+    """
+
+    FIELDS = ("requests", "429", "403", "5xx", "retries", "retry_after_honored",
+              "skipped_by_breaker")
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._hosts: dict[str, dict[str, int]] = {}
+        self._consec: dict[str, int] = {}
+
+    def _h(self, host: str) -> dict[str, int]:
+        return self._hosts.setdefault(host, dict.fromkeys(self.FIELDS, 0))
+
+    def add(self, host: str, field: str, n: int = 1) -> None:
+        with self._lock:
+            self._h(host)[field] += n
+
+    def record_response(self, host: str, status: int) -> None:
+        with self._lock:
+            h = self._h(host)
+            h["requests"] += 1
+            if status in (429, 403):
+                h[str(status)] += 1
+                self._consec[host] = self._consec.get(host, 0) + 1
+            else:
+                self._consec[host] = 0
+                if status >= 500:
+                    h["5xx"] += 1
+
+    def record_transport_error(self, host: str) -> None:
+        with self._lock:
+            self._h(host)["requests"] += 1
+
+    def count(self, host: str, field: str) -> int:
+        with self._lock:
+            return self._hosts.get(host, {}).get(field, 0)
+
+    def consecutive(self, host: str) -> int:
+        with self._lock:
+            return self._consec.get(host, 0)
+
+    def snapshot(self) -> dict[str, dict[str, int]]:
+        with self._lock:
+            return {h: dict(v) for h, v in sorted(self._hosts.items())}
+
+
+STATS = HostStats()
+
+
+def begin_scan() -> HostStats:
+    """Start a fresh per-scan stats object (module-global so Workday's inner threads share it)."""
+    global STATS
+    STATS = HostStats()
+    return STATS
+
+
+def parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:
+    """Retry-After as seconds: delta-seconds or an HTTP-date. None if absent/unparseable.
+    Result is clamped to [0, RETRY_AFTER_CAP]."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return min(float(value), RETRY_AFTER_CAP)
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    delta = (when - (now or datetime.now(timezone.utc))).total_seconds()
+    return min(max(delta, 0.0), RETRY_AFTER_CAP)
+
+
 def request_with_retry(
     client: httpx.Client,
     method: str,
@@ -49,21 +136,26 @@ def request_with_retry(
 ) -> httpx.Response:
     """Issue a request, retrying transient failures with exponential backoff.
 
-    On HTTP 429 the server's `Retry-After` header is honored (capped) instead of
-    the exponential schedule; a little random jitter is added to every wait so
-    retries don't hammer in lockstep.
+    On HTTP 429/503 the server's `Retry-After` header (seconds or HTTP-date, capped at
+    RETRY_AFTER_CAP) is honored instead of the exponential schedule; a little random jitter
+    is added to every wait so retries don't hammer in lockstep. Every attempt is counted in
+    STATS under the URL's host.
     """
+    host = urlsplit(url).hostname or ""
     last_exc: Exception | None = None
     for attempt in range(retries):
         try:
             resp = client.request(method, url, **kwargs)
         except httpx.TransportError as exc:
+            STATS.record_transport_error(host)
             last_exc = exc
             if attempt == retries - 1:
                 break
+            STATS.add(host, "retries")
             time.sleep(backoff * (2**attempt) + random.uniform(0, 0.5))
             continue
 
+        STATS.record_response(host, resp.status_code)
         # retry on transient server / rate-limit statuses
         if resp.status_code in (429, 500, 502, 503, 504):
             last_exc = httpx.HTTPStatusError(
@@ -72,10 +164,12 @@ def request_with_retry(
             if attempt == retries - 1:
                 break
             wait = backoff * (2**attempt)
-            if resp.status_code == 429:
-                retry_after = resp.headers.get("Retry-After", "")
-                if retry_after.isdigit():
-                    wait = min(float(retry_after), 60.0)  # respect, but cap at 60s
+            if resp.status_code in (429, 503):
+                honored = parse_retry_after(resp.headers.get("Retry-After"))
+                if honored is not None:
+                    wait = honored
+                    STATS.add(host, "retry_after_honored")
+            STATS.add(host, "retries")
             time.sleep(wait + random.uniform(0, 0.5))
             continue
 
