@@ -152,6 +152,11 @@ with a private manage link appears in that channel. Open it and press **Activate
 
 ## 7. Operations
 
+- **Synopsys moved from `radancy` to `avature`** (2026-11-10). `Job.uid` is `source:company:external_id`, so
+  every Synopsys posting gets a new uid and would alert again on Discord. Before the first scan that uses the
+  avature entry on a live DB, run it silently once: `.venv/bin/jobhunt scan --seed --no-jitter`. It stores the
+  postings without matching or delivering. The old `radancy` Synopsys rows stay as history and are not re-alerted.
+  The same applies to any company whose `ats` changes in `companies.resolved.yaml`.
 - **Logs** (on the worker, in `~/jobhunt-v2/logs/`): `worker.log` (scans), `heartbeat.log`,
   `backup.log`. They are gitignored and redacted, but treat them as private. Web logs: Vercel
   dashboard. Manage tokens appear in `GET /manage?t=` request logs, so treat those as sensitive.

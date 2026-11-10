@@ -1194,8 +1194,8 @@ companies:
   host: jobs.intuit.com
 - name: Synopsys
   priority: 4
-  ats: radancy
-  host: careers.synopsys.com
+  ats: avature
+  host: synopsys.avature.net
 - name: Klarna
   priority: 3
   ats: deel
@@ -1455,3 +1455,54 @@ companies:
   priority: 4
   ats: bamboohr
   slug: relicentertainment
+# --- 2026-11-10: avature/recruitee adapters + recheck (radancy/oraclehcm/eightfold/workday/smartrecruiters) ---
+- name: Electronic Arts
+  priority: 3
+  ats: avature
+  host: jobs.ea.com
+- name: Lululemon
+  priority: 4
+  ats: avature
+  host: careers.lululemon.com
+- name: Two Sigma
+  priority: 1
+  ats: avature
+  site: careers/OpenRoles
+  host: careers.twosigma.com
+- name: Bloomberg
+  priority: 1
+  ats: avature
+  host: bloomberg.avature.net
+- name: Huawei Canada
+  priority: 4
+  ats: recruitee
+  slug: huaweicanada
+  host: huaweicanada.recruitee.com
+- name: Arm
+  priority: 2
+  ats: radancy
+  host: careers.arm.com
+- name: American Express
+  priority: 3
+  ats: oraclehcm
+  site: CX_1
+  host: egug.fa.us2.oraclecloud.com
+- name: Morgan Stanley
+  priority: 1
+  ats: eightfold
+  slug: morganstanley.com
+  host: morganstanley.eightfold.ai
+- name: Moody's
+  priority: 4
+  ats: radancy
+  host: careers.moodys.com
+- name: Dataminr
+  priority: 4
+  ats: workday
+  tenant: dataminr
+  wd: wd12
+  site: Dataminr
+- name: Ubisoft
+  priority: 4
+  ats: smartrecruiters
+  slug: Ubisoft2

@@ -41,6 +41,7 @@ _TENANT_DOMAINS = {
     "bamboohr": "bamboohr.com",
     "jazzhr": "applytojob.com",
     "pinpoint": "pinpointhq.com",
+    "recruitee": "recruitee.com",
 }
 
 
