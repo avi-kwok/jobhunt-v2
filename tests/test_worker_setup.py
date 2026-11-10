@@ -28,6 +28,22 @@ def test_sourcing_does_not_run_main():
     assert _bash("echo sourced") == "sourced\n"
 
 
+@pytest.mark.parametrize("mode", ["pipe", "file"])
+def test_entry_guard_runs_main(tmp_path, mode):
+    """`curl ... | bash` (no BASH_SOURCE under set -u) and `bash file` must both reach main."""
+    src = SETUP.read_text()
+    guard = src[src.rindex("\nif "):]  # the trailing entry guard
+    script = "set -euo pipefail\nmain() { echo RAN; }\n" + guard
+    if mode == "pipe":
+        r = subprocess.run(["bash"], input=script, capture_output=True, text=True)
+    else:
+        f = tmp_path / "s.sh"
+        f.write_text(script)
+        r = subprocess.run(["bash", str(f)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "RAN\n"
+
+
 def test_block_has_three_jobs_with_required_shape():
     out = _bash(f'render_cron_block "{HOME_DIR}"')
     lines = out.splitlines()
