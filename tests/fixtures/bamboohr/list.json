@@ -1,0 +1,40 @@
+{
+ "meta": {
+  "totalCount": 3
+ },
+ "result": [
+  {
+   "id": "1",
+   "jobOpeningName": "Product Co-op",
+   "departmentLabel": "Product",
+   "employmentStatusLabel": "Full-Time",
+   "location": {
+    "city": "Vancouver",
+    "state": "British Columbia"
+   },
+   "isRemote": null
+  },
+  {
+   "id": "2",
+   "jobOpeningName": "Support Specialist",
+   "departmentLabel": "Support",
+   "employmentStatusLabel": "Full-Time",
+   "location": {
+    "city": null,
+    "state": null
+   },
+   "isRemote": true
+  },
+  {
+   "id": "2",
+   "jobOpeningName": "Support Specialist",
+   "departmentLabel": "Support",
+   "employmentStatusLabel": "Full-Time",
+   "location": {
+    "city": null,
+    "state": null
+   },
+   "isRemote": true
+  }
+ ]
+}

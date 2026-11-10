@@ -1,0 +1,7 @@
+{"hits": {"total": {"value": 2}, "hits": [
+ {"_id": "abc", "_source": {"url": "https://careers.ibm.com/careers/JobDetail?jobId=140053", "dcdate": "2026-11-10",
+  "title": "Applied AI Specialist Intern", "description": "A career in <b>IBM</b>...", "field_keyword_05": "Singapore",
+  "field_keyword_08": "Software Engineering", "field_keyword_18": "Internship", "field_keyword_19": "Singapore, SG"}},
+ {"_id": "def", "_source": {"url": "https://careers.ibm.com/careers/JobDetail?jobId=2", "dcdate": "2026-11-09",
+  "title": "Senior Architect", "description": "x"}}
+]}}

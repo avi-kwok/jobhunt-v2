@@ -1,0 +1,32 @@
+[
+ {
+  "id": "g1",
+  "title": "Intern, Engineering",
+  "absolute_url": "https://jobs.gem.com/ex/g1",
+  "content": "<p>Hi</p>",
+  "content_plain": "Hi there",
+  "employment_type": "intern",
+  "first_published_at": "2026-09-15T19:54:22.092Z",
+  "departments": [
+   {
+    "name": "Eng"
+   }
+  ],
+  "location": {
+   "name": "Waterloo, Canada"
+  }
+ },
+ {
+  "id": "g1",
+  "title": "Intern, Engineering",
+  "absolute_url": "https://jobs.gem.com/ex/g1"
+ },
+ {
+  "id": "g2",
+  "title": "AE",
+  "absolute_url": "https://jobs.gem.com/ex/g2",
+  "content": "<p>x</p>",
+  "departments": [],
+  "location": null
+ }
+]

@@ -90,6 +90,9 @@ def test_host_keys():
     assert scheduler.host_key(co("a", "lever")) == "api.lever.co"
     assert scheduler.host_key(co("a", "ashby")) == "api.ashbyhq.com"
     assert scheduler.host_key(co("a", "amazon")) == "www.amazon.jobs"
+    for ats, dom in (("bamboohr", "bamboohr.com"), ("jazzhr", "applytojob.com"), ("pinpoint", "pinpointhq.com")):
+        c = CompanyConfig(name="t", ats=ats, slug="FiSpan")
+        assert scheduler.host_key(c) == f"fispan.{dom}"  # matches STATS key (lowercased hostname)
     wd = CompanyConfig(name="w", ats="workday", tenant="nvidia", wd="wd5", site="s")
     assert scheduler.host_key(wd) == "nvidia.wd5.myworkdayjobs.com"
 

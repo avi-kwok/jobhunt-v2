@@ -1,0 +1,39 @@
+{
+ "jobs": [
+  {
+   "data": {
+    "slug": "101",
+    "req_id": "101",
+    "title": "Software Engineer Intern",
+    "description": "<p>Build <b>things</b></p>",
+    "location_name": "US-Seattle",
+    "full_location": "Seattle, Washington",
+    "categories": [
+     {
+      "name": "University"
+     }
+    ],
+    "employment_type": "INTERN",
+    "posted_date": "2026-10-09T20:49:00+0000"
+   }
+  },
+  {
+   "data": {
+    "slug": "102",
+    "req_id": "102",
+    "title": "Data Intern",
+    "description": "<p>Build <b>things</b></p>",
+    "location_name": "US-Seattle",
+    "full_location": null,
+    "categories": [
+     {
+      "name": "University"
+     }
+    ],
+    "employment_type": "INTERN",
+    "posted_date": "2026-10-09T20:49:00+0000"
+   }
+  }
+ ],
+ "totalCount": 2
+}

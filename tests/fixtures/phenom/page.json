@@ -1,0 +1,42 @@
+{
+ "refineSearch": {
+  "status": 200,
+  "data": {
+   "jobs": [
+    {
+     "jobId": "R-4788",
+     "reqId": "R-4788",
+     "jobSeqNo": "CBJCGMUSR4788EXTERNALENUS",
+     "title": "Legal Intern",
+     "cityStateCountry": "Chicago, Illinois, United States of America",
+     "category": "Early Career",
+     "type": "Full time",
+     "descriptionTeaser": "Take on the role of Legal Intern and support Cboe\u2019s U.S. Legal team in delivering regulated legal services. Assist attorneys with financial product regulation, contract drafting, and regulatory filings. Ideal for law students with strong analytical, communication, and organizational skills, seeking hands-on experience in a fast-paced, regulated environment.",
+     "postedDate": "2026-10-30T00:00:00.000+0000"
+    },
+    {
+     "jobId": "R-4658",
+     "reqId": "R-4658",
+     "jobSeqNo": "CBJCGMUSR4658EXTERNALENUS",
+     "title": "Infrastructure Intern",
+     "cityStateCountry": "Chicago, Illinois, United States of America",
+     "category": "Early Career",
+     "type": "Full time",
+     "descriptionTeaser": "Become part of our team as an Infrastructure Intern, supporting the technology that powers Cboe's global workforce, offices, and exchanges. Contribute to network and end-user computing operations, assist with troubleshooting, and develop technical skills in a fast-paced financial technology environment. Ideal for students pursuing IT or related fields with a keen interest in infrastructure and automation.",
+     "postedDate": "2026-09-30T00:00:00.000+0000"
+    },
+    {
+     "jobId": "R-4709",
+     "reqId": "R-4709",
+     "jobSeqNo": "CBJCGMUSR4709EXTERNALENUS",
+     "title": "Marketing Intern",
+     "cityStateCountry": "Chicago, Illinois, United States of America",
+     "category": "Early Career",
+     "type": "Full time",
+     "descriptionTeaser": "We are looking for a Marketing Intern to support the creation and execution of multi-media advertising and promotional campaigns at Cboe Global Markets. You will collaborate with marketing and communications teams, manage projects, and contribute to brand initiatives. Ideal for students with strong organizational and communication skills, eager to gain hands-on experience in a dynamic financial environment.",
+     "postedDate": "2026-10-02T00:00:00.000+0000"
+    }
+   ]
+  }
+ }
+}

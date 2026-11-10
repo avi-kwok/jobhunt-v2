@@ -1,0 +1,68 @@
+{
+ "items": [
+  {
+   "id": "a1",
+   "name": "Software Engineer Intern",
+   "url": "https://ats.rippling.com/ex/jobs/a1",
+   "department": {
+    "name": "Eng"
+   },
+   "locations": [
+    {
+     "name": "Toronto",
+     "country": "Canada",
+     "countryCode": "CA",
+     "state": null,
+     "stateCode": null,
+     "city": null,
+     "workplaceType": "REMOTE"
+    }
+   ],
+   "language": "en-US"
+  },
+  {
+   "id": "a1",
+   "name": "Software Engineer Intern",
+   "url": "https://ats.rippling.com/ex/jobs/a1",
+   "department": {
+    "name": "Eng"
+   },
+   "locations": [
+    {
+     "name": "Remote",
+     "country": "Canada",
+     "countryCode": "CA",
+     "state": null,
+     "stateCode": null,
+     "city": null,
+     "workplaceType": "REMOTE"
+    }
+   ],
+   "language": "en-US"
+  },
+  {
+   "id": "a2",
+   "name": "Director, Sales",
+   "url": "https://ats.rippling.com/ex/jobs/a2",
+   "department": {
+    "name": "Eng"
+   },
+   "locations": [
+    {
+     "name": "Ottawa",
+     "country": "Canada",
+     "countryCode": "CA",
+     "state": null,
+     "stateCode": null,
+     "city": null,
+     "workplaceType": "REMOTE"
+    }
+   ],
+   "language": "en-US"
+  }
+ ],
+ "page": 0,
+ "pageSize": 100,
+ "totalItems": 4,
+ "totalPages": 2
+}

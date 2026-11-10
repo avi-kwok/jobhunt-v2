@@ -1,0 +1,8 @@
+{"res": {"totalRecords": 3, "searchResults": [
+ {"id": "PIPE-200676091", "positionId": "200676091", "postingTitle": "Software Engineering Internship",
+  "transformedPostingTitle": "software-engineering-internship", "postDateInGMT": "2026-08-05T17:13:13.154261238Z",
+  "jobSummary": "<p>Build <b>great</b> things.</p>", "team": {"teamName": "Software and Services"},
+  "locations": [{"city": "Cupertino", "stateProvince": "California", "countryName": "United States of America"}]},
+ {"id": "PIPE-1", "positionId": "1", "postingTitle": "Senior Engineer", "transformedPostingTitle": "senior-engineer",
+  "postDateInGMT": "2026-08-05T17:13:13Z", "jobSummary": "x", "locations": []}
+]}}

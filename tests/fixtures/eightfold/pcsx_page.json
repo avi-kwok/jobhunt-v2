@@ -1,0 +1,30 @@
+{
+ "status": 200,
+ "data": {
+  "positions": [
+   {
+    "id": 1,
+    "displayJobId": "1",
+    "name": "Software Engineer Intern",
+    "locations": [
+     "Plano,Texas,United States"
+    ],
+    "postedTs": 1792616583,
+    "department": "Eng",
+    "positionUrl": "/careers/job/1"
+   },
+   {
+    "id": 2,
+    "displayJobId": "2",
+    "name": "Data Intern",
+    "locations": [
+     "Plano,Texas,United States"
+    ],
+    "postedTs": 1792616583,
+    "department": "Eng",
+    "positionUrl": "/careers/job/2"
+   }
+  ],
+  "count": 2
+ }
+}

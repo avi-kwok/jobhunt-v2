@@ -1,0 +1,39 @@
+{
+ "data": [
+  {
+   "id": "10",
+   "title": "Cloud Co-op ",
+   "description": "<p>Desc</p>",
+   "key_responsibilities": "<ul><li>Do</li></ul>",
+   "skills_knowledge_expertise": "",
+   "employment_type_text": "Full Time",
+   "url": "https://careers.ex.com/en/postings/x",
+   "path": "/en/postings/x",
+   "job": {
+    "department": {
+     "name": "Eng"
+    }
+   },
+   "location": {
+    "name": "Toronto",
+    "city": "Toronto"
+   }
+  },
+  {
+   "id": "10",
+   "title": "Cloud Co-op ",
+   "description": "dup",
+   "url": "https://careers.ex.com/en/postings/x",
+   "job": {},
+   "location": {}
+  },
+  {
+   "id": "11",
+   "title": "Sales Rep",
+   "description": "",
+   "url": "https://careers.ex.com/en/postings/y",
+   "job": {},
+   "location": {}
+  }
+ ]
+}

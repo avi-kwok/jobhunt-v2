@@ -47,7 +47,8 @@ def _merge_resolved(
         target = by_name.get(name)
         if target is None:
             continue
-        for field in ("ats", "slug", "tenant", "wd", "site", "workday_facets"):
+        for field in ("ats", "slug", "tenant", "wd", "site", "host", "workday_facets",
+                      "eightfold_mode"):
             if entry.get(field) is not None:
                 setattr(target, field, entry[field])
 

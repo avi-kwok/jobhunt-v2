@@ -1,0 +1,28 @@
+{
+ "items": [
+  {
+   "id": "a3",
+   "name": "Marketing Co-op",
+   "url": "https://ats.rippling.com/ex/jobs/a3",
+   "department": {
+    "name": "Eng"
+   },
+   "locations": [
+    {
+     "name": "Montreal",
+     "country": "Canada",
+     "countryCode": "CA",
+     "state": null,
+     "stateCode": null,
+     "city": null,
+     "workplaceType": "REMOTE"
+    }
+   ],
+   "language": "en-US"
+  }
+ ],
+ "page": 1,
+ "pageSize": 100,
+ "totalItems": 4,
+ "totalPages": 2
+}

@@ -39,11 +39,15 @@ class CompanyConfig(BaseModel):
     slug: str | None = None  # greenhouse/lever/ashby board token
     tenant: str | None = None  # workday
     wd: str | None = None  # workday host, e.g. "wd5"
-    site: str | None = None  # workday site
+    site: str | None = None  # workday site (or another ATS's site/board id)
+    host: str | None = None  # ATS API host for tenant-hosted ATSes (also the politeness unit)
     # workday: None/True = auto-detect an internship facet and fetch with one
     # facet-filtered search; False = force the searchText phrase-search path
     # (escape hatch for boards whose intern facet misses eligible postings).
     workday_facets: bool | None = None
+    # eightfold: pin the search endpoint ("pcsx" | "legacy") instead of probing pcsx first;
+    # for tenants whose pcsx endpoint is known to answer 403.
+    eightfold_mode: str | None = None
 
 
 class Criteria(BaseModel):

@@ -1,0 +1,13 @@
+{
+ "uuid": "a1",
+ "name": "Software Engineer Intern",
+ "description": {
+  "company": "<p>About us</p>",
+  "role": "<p>Build things</p>"
+ },
+ "employmentType": {
+  "label": "INTERN",
+  "id": "Intern"
+ },
+ "createdOn": "2026-09-21T16:52:52.420000-07:00"
+}

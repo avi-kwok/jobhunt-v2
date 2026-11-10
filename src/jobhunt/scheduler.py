@@ -25,14 +25,35 @@ _FIXED_HOSTS = {
     "lever": "api.lever.co",
     "ashby": "api.ashbyhq.com",
     "amazon": "www.amazon.jobs",
+    "smartrecruiters": "api.smartrecruiters.com",
+    "workable": "apply.workable.com",
+    "apple": "jobs.apple.com",
+    "ibm": "www-api.ibm.com",
+    "rippling": "ats.rippling.com",
+    "gem": "api.gem.com",
+    "jobvite": "jobs.jobvite.com",
+    "deel": "jobs.deel.com",
+}
+
+# Per-tenant subdomain ATSes: requests (and so STATS) go to <slug>.<domain>, so the
+# politeness / 429 / breaker key must be that same real hostname.
+_TENANT_DOMAINS = {
+    "bamboohr": "bamboohr.com",
+    "jazzhr": "applytojob.com",
+    "pinpoint": "pinpointhq.com",
 }
 
 
 def host_key(company) -> str:
     """The ATS API host this company's requests go to (the politeness unit)."""
     ats = company.ats or ""
+    if getattr(company, "host", None):
+        return company.host
     if ats == "workday" and company.tenant and company.wd:
         return f"{company.tenant}.{company.wd}.myworkdayjobs.com"
+    if ats in _TENANT_DOMAINS:
+        slug = (company.slug or "").strip()
+        return f"{slug.lower()}.{_TENANT_DOMAINS[ats]}" if slug else _TENANT_DOMAINS[ats]
     return _FIXED_HOSTS.get(ats, ats or "unknown")
 
 
