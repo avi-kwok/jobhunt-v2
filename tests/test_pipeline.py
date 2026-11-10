@@ -71,7 +71,8 @@ def add_sub(conn, n, activated_at, **kw):
 def posted_titles(route):
     out = []
     for call in route.calls:
-        out += [e["title"] for e in json.loads(call.request.content)["embeds"]]
+        # titles are "<Company> — <Position>"; these tests compare positions
+        out += [e["title"].split(" — ", 1)[-1] for e in json.loads(call.request.content)["embeds"]]
     return out
 
 

@@ -45,6 +45,12 @@ class CompanyConfig(BaseModel):
     # facet-filtered search; False = force the searchText phrase-search path
     # (escape hatch for boards whose intern facet misses eligible postings).
     workday_facets: bool | None = None
+    # workday: per-board overrides for huge boards whose fuzzy searchText matches
+    # nearly everything. `workday_search_terms` replaces SEARCH_TERMS on the phrase
+    # path; `workday_applied_facets` (e.g. {locationCountry: [US id, CA id]}) is
+    # ANDed into every search so only CA/US postings are paged.
+    workday_search_terms: list[str] | None = None
+    workday_applied_facets: dict[str, list[str]] | None = None
     # eightfold: pin the search endpoint ("pcsx" | "legacy") instead of probing pcsx first;
     # for tenants whose pcsx endpoint is known to answer 403.
     eightfold_mode: str | None = None
@@ -60,6 +66,9 @@ class Criteria(BaseModel):
     # "product manager" doesn't trip the "manager" exclude ("Product Manager
     # Intern" passes; "Senior Product Manager" still fails on "senior").
     exclude_exempt_terms: list[str] = []
+    # Companies (exact watchlist names, case-insensitive) where an ambiguous role
+    # term (classify.AMBIGUOUS_ROLE_TERMS) needs a software anchor in the title.
+    hardware_heavy_companies: list[str] = []
     location_match_required: bool = True
     # Only notify on postings whose own timestamp is within this many minutes.
     # None/0 disables the timestamp filter (rely on the dedupe alone).

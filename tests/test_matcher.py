@@ -229,3 +229,12 @@ def test_real_config_drops_pm_and_keeps_swe():
         "Business Analyst Intern",
     ):
         assert not prefilter(_job(title), crit, tiers)[0], title
+
+
+def test_flexible_any_site_is_unresolved():
+    from jobhunt.matcher import _is_unresolved_location
+
+    assert _is_unresolved_location("Flexible - Any SpaceX Site")
+    assert _is_unresolved_location("Any SpaceX Site")
+    assert not _is_unresolved_location("Flexible - London, UK")
+    assert not _is_unresolved_location("Hawthorne, CA")

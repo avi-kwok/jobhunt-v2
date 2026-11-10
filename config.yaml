@@ -16,12 +16,24 @@ criteria:
   # "student"/"campus" added for Canadian bank & co-op wording (e.g. RBC's
   # "Fall Student Opportunities Technology"). v2 matches these as WHOLE WORDS
   # (classify.py), so "Internal"/"International"/"Cooperative" never count.
-  internship_terms: [intern, internship, "co-op", coop, "co op", student, campus]
+  # stagiaire (Quebec French) / werkstudent added; French "stage" is matched only in
+  # intern-shaped positions in classify.py (bare "stage" hits "Stage 0 Propellant").
+  internship_terms: [intern, internship, "co-op", coop, "co op", student, campus,
+                     stagiaire, werkstudent]
 
   # TITLE must contain at least one of these (a SWE/dev/infra/security role).
   # v2: the PM-adjacent group (product manager, APM, TPM, product owner, product
   # marketing, program manager, ...) was REMOVED - PM is out of launch scope.
   # classify.py adds mobile/ios/android/embedded/firmware/ML-engineer terms in code.
+  # Ambiguous discipline names (systems/integration/automation/build/production/
+  # platform/infrastructure engineer, front end, mobile app; classify.py
+  # AMBIGUOUS_ROLE_TERMS) never count when the title has a hardware/physical
+  # discipline word (radar, acoustic, avionics, industrial, ...), and otherwise
+  # count when the title has a software anchor (software, cloud, data, AI, IT, ...)
+  # OR the company is NOT in hardware_heavy_companies. So "Radar Systems Engineer
+  # - Intern" is out everywhere, "Systems Engineer Intern" is out at Lockheed
+  # Martin, "Platform Engineer Intern" is in at DRW, "IT Systems Engineer Intern"
+  # is in everywhere.
   role_terms:
     - software engineer
     - software developer
@@ -46,14 +58,16 @@ criteria:
     - dev ops
     - site reliability
     - sre
-    - systems engineer
+    - systems engineer      # ambiguous: needs a software anchor (classify.py)
     - systems software
     - application developer
     - application software
     - developer tools
     - developer productivity
     - developer experience
-    - automation engineer
+    - automation engineer   # ambiguous: see hardware_heavy_companies below
+    - test automation
+    - software automation
     - integration engineer
     - api engineer
     - api developer
@@ -70,6 +84,28 @@ criteria:
     - release engineer
     - build engineer
     - technology analyst   # bank early-career dev-track title (e.g. TD/RBC)
+    - developer            # classify.py vetoes business/model/curriculum/content/product/... developer
+    - programmer
+    - software intern
+    - software internship
+    - software co-op
+    - software qa
+    - software test
+    - software tools
+    - quantitative developer
+    - ai engineer
+    - ai developer
+    - ml engineer
+    - machine learning
+    - cybersecurity
+    - cyber engineer
+    # Quebec French titles (Bombardier, Beenox, ...)
+    - développement logiciel
+    - développeur
+    - développeuse
+    - logiciel
+    - programmation
+    - programmeur
 
   # TITLE containing any of these is rejected (keeps it internship-level):
   exclude_terms:
@@ -86,9 +122,23 @@ criteria:
     - mba
     - full-time        # tune: remove if it drops valid "full-time internship" posts
 
-  # Phrases stripped from the title BEFORE exclude_terms is checked. v2: empty
-  # (it only existed so PM-track titles survived the "manager" exclude).
-  exclude_exempt_terms: []
+  # Phrases stripped from the title BEFORE exclude_terms is checked.
+  # "BS/MS/PhD" postings are open to undergrads; keep them past the "phd" exclude.
+  exclude_exempt_terms: [bs/ms/phd, ms/phd]
+
+  # Defense / aerospace / automotive / industrial / semiconductor-hardware / pharma
+  # employers where an ambiguous role title with no software anchor ("Systems
+  # Engineering Co-op", "Automation Engineer Intern", "Platform Engineer Intern")
+  # is almost always a hardware, test or process role. Exact watchlist names
+  # (case-insensitive). Software-anchored titles there still count
+  # ("Software Systems Engineer Intern" at RTX).
+  hardware_heavy_companies:
+    [RTX, Lockheed Martin, Northrop Grumman, Boeing, GE Aerospace, Bombardier,
+     Garmin, Bose, Texas Instruments, Analog Devices, Honeywell, Caterpillar,
+     John Deere, 3M, Siemens, General Motors, Ford, Lucid Motors, SpaceX, Anduril,
+     Accenture, Applied Materials, Lam Research, Micron, Marvell, Celestica,
+     Hydro One, Ontario Power Generation, Pfizer, Johnson & Johnson, Moderna,
+     Seagate, Western Digital, ASML, MDA Space]
 
   # FRESHNESS. Only notify on postings whose own timestamp is within this many
   # minutes. 60 comfortably covers the scan cadence (every 15-30 min) so a job
@@ -192,7 +242,11 @@ company_priorities:
      Qualcomm, Arm, Broadcom, Autodesk, SAP, Dropbox, Twilio, Postman, Vercel,
      Cockroach Labs, PagerDuty, Sentry, Canva, Asana, Samsara, The Trade Desk,
      Pinterest, Reddit, Roblox, TikTok, Scale AI, Glean, Cohere, Perplexity,
-     1Password, GitLab, Workday]
+     1Password, GitLab, Workday,
+     Duolingo, Airtable, Waymo, Nuro, Zoox, SpaceX, Anduril, Linear, Retool,
+     Hugging Face, xAI, Mistral AI, Character.AI, Runway, Epic Systems,
+     Old Mission, Wolverine Trading, Belvedere Trading, Flow Traders,
+     Balyasny, Bridgewater Associates, Renaissance Technologies]
   3:   # STILL WORTH TRACKING
     [Kabam, Blackbird Interactive,
      Snap, Spotify, Instacart, Etsy, eBay, Expedia Group, Walmart Global Tech,
@@ -202,7 +256,12 @@ company_priorities:
      StackAdapt, Global Relay, Arctic Wolf, Fortinet, Nasdaq, CME Group,
      American Express, Bank of America, Citi, Fidelity Investments,
      Charles Schwab, DRW, SIG, Akuna Capital, Tower Research Capital,
-     Virtu Financial, DigitalOcean]
+     Virtu Financial, DigitalOcean,
+     Zillow, Texas Instruments, Micron, Marvell, Applied Materials,
+     Lam Research, ASML, Lockheed Martin, Northrop Grumman, Boeing, RTX,
+     General Motors, Ford, Lucid Motors, Motional, Activision Blizzard,
+     Celestica, MDA Space, Bombardier, CGI, Hydro One,
+     Ontario Power Generation, Sumo Logic, Jasper]
 
 # ---------------------------------------------------------------------------
 # WATCHLIST — resolve with `jobhunt discover`. Obvious duplicate aliases have
@@ -211,30 +270,41 @@ company_priorities:
 # ---------------------------------------------------------------------------
 companies:
   - name: 1Password
+  - name: 3M
+  - name: Accenture
   - name: ACI Worldwide
+  - name: Activision Blizzard
   - name: Adobe
   - name: Adyen
   - name: Affirm
   - name: Afterpay
   - name: Airbnb
+  - name: Airtable
   - name: Akamai Technologies
   - name: Akuna Capital
   - name: Algolia
   - name: Amazon            # covers AWS / Amazon Web Services (amazon.jobs)
   - name: AMD
   - name: American Express
+  - name: Analog Devices
+  - name: Anduril
   - name: Apple
   - name: Applied Intuition
+  - name: Applied Materials
   - name: Arctic Wolf
   - name: Arista Networks
   - name: Arm
   - name: Asana
+  - name: ASML
   - name: Atlassian
   - name: Audible
   - name: Aurora Innovation
   - name: Autodesk
   - name: Avalara
+  - name: Balyasny
   - name: Bank of America
+  - name: Belvedere Trading
+  - name: Blizzard
   - name: BMO               # Bank of Montreal
   - name: Barclays
   - name: Bell Canada
@@ -246,10 +316,13 @@ companies:
   - name: BlackRock
   - name: Block             # parent of Square / Cash App / Afterpay
   - name: Bloomberg
+  - name: Boeing
   - name: Bolt Financial
+  - name: Bose
   - name: Box
   - name: Braze
   - name: Brex
+  - name: Bridgewater Associates
   - name: Broadcom
   - name: Broadridge
   - name: Bugcrowd
@@ -258,9 +331,12 @@ companies:
   - name: Capital One
   - name: Carta
   - name: Cash App
+  - name: Caterpillar
   - name: Cboe Global Markets
+  - name: Character.AI
   - name: Charles Schwab
   - name: Check Point Software
+  - name: Chewy
   - name: Chime
   - name: CIBC              # Canadian Imperial Bank of Commerce
   - name: Ciena
@@ -288,6 +364,8 @@ companies:
   - name: Dataminr
   - name: Dayforce
   - name: Dell Technologies
+  - name: Deloitte
+  - name: Deloitte Canada
   - name: Dialpad
   - name: DigitalOcean
   - name: Disney
@@ -296,11 +374,13 @@ companies:
   - name: Dropbox
   - name: DRW
   - name: DTCC
+  - name: Duolingo
   - name: Dynatrace
   - name: eBay
   - name: Elastic
   - name: Electronic Arts
   - name: Epic Games
+  - name: Epic Systems
   - name: Equifax
   - name: Ericsson
   - name: Etsy
@@ -312,9 +392,14 @@ companies:
   - name: Figma
   - name: FIS
   - name: Fiserv
+  - name: Flow Traders
+  - name: Ford
   - name: Fortinet
   - name: FreshBooks
   - name: Freshworks
+  - name: Garmin
+  - name: GE Aerospace
+  - name: General Motors
   - name: Geotab
   - name: GitHub
   - name: GitLab
@@ -327,6 +412,7 @@ companies:
   - name: HackerOne
   - name: Harvey AI
   - name: HashiCorp
+  - name: Honeywell
   - name: HPE               # Hewlett Packard Enterprise
   - name: Hootsuite
   - name: Hopper
@@ -334,6 +420,7 @@ companies:
   - name: Huawei Canada
   - name: HubSpot
   - name: Hudson River Trading
+  - name: Hugging Face
   - name: IBM
   - name: IMC Trading
   - name: Indeed
@@ -344,32 +431,45 @@ companies:
   - name: Intuit
   - name: Jamf
   - name: Jane Street
+  - name: Jasper
+  - name: John Deere
+  - name: Johnson & Johnson
   - name: JPMorgan Chase
   - name: Jump Trading
   - name: Kinaxis
   - name: Klarna
   - name: Klaviyo
+  - name: KPMG
+  - name: Lam Research
   - name: Later
   - name: Lightspeed Commerce
+  - name: Linear
   - name: LinkedIn
   - name: LiveRamp
+  - name: Lockheed Martin
   - name: LSEG              # London Stock Exchange Group
+  - name: Lucid Motors
   - name: Lucid Software
   - name: Lyft
   - name: Manulife
   - name: Marqeta
+  - name: Marvell
   - name: Mastercard
   - name: MathWorks
   - name: Mercury
   - name: Meta
+  - name: Micron
   - name: Microsoft
   - name: Millennium Management
   - name: Miro
+  - name: Mistral AI
+  - name: Moderna
   - name: monday.com
   - name: MongoDB
   - name: Moody's
   - name: Morgan Stanley
   - name: Morningstar
+  - name: Motional
   - name: Motive Technologies
   - name: Motorola Solutions
   - name: MSCI
@@ -381,12 +481,17 @@ companies:
   - name: Netflix
   - name: NetSuite
   - name: New Relic
+  - name: Nextdoor
+  - name: Nintendo
   - name: Nokia
+  - name: Northrop Grumman
   - name: Notion
+  - name: Nuro
   - name: Nutanix
   - name: Nuvei
   - name: NVIDIA
   - name: Okta
+  - name: Old Mission
   - name: OMERS
   - name: OTPP              # Ontario Teachers' Pension Plan
   - name: OpenTable
@@ -397,7 +502,9 @@ companies:
   - name: Palantir
   - name: Palo Alto Networks
   - name: PayPal
+  - name: Peloton
   - name: Perplexity
+  - name: Pfizer
   - name: Pinterest
   - name: Plaid
   - name: Point72
@@ -407,15 +514,20 @@ companies:
   - name: Progressive Insurance
   - name: Proofpoint
   - name: Pure Storage
+  - name: PwC
   - name: Qualcomm
   - name: Qualtrics
   - name: Questrade
+  - name: Quora
   - name: Ramp
   - name: Rapid7
   - name: RBC               # Royal Bank of Canada
   - name: Red Hat
   - name: Reddit
+  - name: Redfin
   - name: Remitly
+  - name: Renaissance Technologies
+  - name: Retool
   - name: Revolut
   - name: Riot Games
   - name: Ripple
@@ -425,7 +537,9 @@ companies:
   - name: Roblox
   - name: Rogers Communications
   - name: Roku
+  - name: RTX
   - name: Rubrik
+  - name: Runway
   - name: S&P Global
   - name: SailPoint
   - name: Salesforce
@@ -434,22 +548,28 @@ companies:
   - name: SAP
   - name: Scale AI
   - name: Scotiabank
+  - name: Seagate
   - name: SentinelOne
   - name: Sentry
   - name: ServiceNow
   - name: Shopify
+  - name: Siemens
   - name: Slack
   - name: Smartsheet
   - name: Snap
   - name: Snowflake
   - name: Snyk
   - name: SoFi
+  - name: Sony
+  - name: Sony Interactive Entertainment
+  - name: SpaceX
   - name: Splunk
   - name: Spotify
   - name: Square
   - name: StackAdapt
   - name: State Street
   - name: Stripe
+  - name: Sumo Logic
   - name: Sun Life
   - name: SIG               # Susquehanna International Group
   - name: Synopsys
@@ -459,6 +579,7 @@ companies:
   - name: Tenable
   - name: Tenstorrent
   - name: Tesla
+  - name: Texas Instruments
   - name: The Trade Desk
   - name: Thomson Reuters
   - name: TikTok
@@ -484,17 +605,23 @@ companies:
   - name: VMware
   - name: Walmart Global Tech
   - name: Wayfair
+  - name: Waymo
   - name: Wealthsimple
   - name: Wells Fargo
+  - name: Western Digital
   - name: Wise
   - name: Wiz
+  - name: Wolverine Trading
   - name: Workday
   - name: Workiva
+  - name: xAI
   - name: Xero
   - name: Yelp
   - name: Zendesk
+  - name: Zillow
   - name: Zoom
   - name: ZoomInfo
+  - name: Zoox
   - name: Zscaler
 
   # --- Canadian expansion (2026-10-19): companies with Canadian SWE intern/co-op
@@ -525,16 +652,20 @@ companies:
   - name: Borealis AI
   - name: Borrowell
   - name: Canadian Tire
+  - name: Celestica
   - name: Clearco
   - name: Coinsquare
   - name: Ecobee
   - name: Float
+  - name: Hydro One
   - name: Ideogram
   - name: Interac
   - name: KOHO
   - name: League
   - name: Loblaw Digital
+  - name: MDA Space
   - name: Nesto
+  - name: Ontario Power Generation
   - name: PolicyMe
   - name: Rose Rocket
   - name: Super.com
@@ -569,14 +700,17 @@ companies:
   # Montreal / Quebec
   - name: AppDirect
   - name: Behaviour Interactive
+  - name: Bombardier
   - name: Botpress
   - name: CAE
+  - name: CGI
   - name: Coveo
   - name: Desjardins
   - name: Dialogue
   - name: Flinks
   - name: Genetec
   - name: Mistplay
+  - name: Moment Factory
   - name: Plusgrade
   - name: Shakepay
   - name: Ubisoft
@@ -584,6 +718,7 @@ companies:
   # Prairies
   - name: AltaML
   - name: Arcurve
+  - name: Canada Life
   - name: Drivewyze
   - name: Helcim
   - name: Pason Systems

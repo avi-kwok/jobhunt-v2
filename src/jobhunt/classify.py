@@ -17,7 +17,7 @@ from functools import lru_cache
 from .matcher import _is_remote, _is_unresolved_location
 from .models import Criteria, Job
 
-RULES_VERSION = 1
+RULES_VERSION = 2
 
 # ---- term lists -----------------------------------------------------------
 
@@ -26,7 +26,51 @@ EXTRA_SWE_TERMS = [
     "mobile developer", "mobile engineer", "mobile software", "mobile app",
     "ios", "android", "embedded", "firmware",
     "machine learning engineer", "ml engineer", "data engineer", "security engineer",
+    "front end engineer", "frontend engineer",
 ]
+
+# Role terms that are also hardware / industrial discipline names ("Systems
+# Engineering Co-Op" at a defense prime, "Production Engineer (Starship)",
+# "Front-End Materials Procurement"). One counts as SWE only when the title has no
+# hardware-discipline veto word (_HW_VETO_RE) AND either carries a software anchor
+# (_ANCHOR_RE) or the company is not in criteria.hardware_heavy_companies.
+AMBIGUOUS_ROLE_TERMS = frozenset({
+    "systems engineer", "integration engineer", "automation engineer", "build engineer",
+    "production engineer", "platform engineer", "infrastructure engineer",
+    "front end", "front-end", "frontend", "mobile app",
+})
+_ANCHOR_RE = re.compile(
+    r"\b(?:software|firmware|devops|cloud|kubernetes|web|developers?|data|ml|ai|(?-i:IT)|"
+    r"network|cyber|test\s+automation|sre|computer\s+science|applications?)\b",
+    re.IGNORECASE,
+)
+# Hardware / physical-discipline words that veto an ambiguous role term at ANY
+# company ("Radar Systems Engineer", "Industrial Automation Engineer", "Display
+# Systems Engineering Co-Op"). "vehicle" / "controls" / "data center" don't veto
+# when the title also says "software" ("Vehicle Software Integration Engineer");
+# "Data Center Infrastructure Engineer Intern" is facilities work.
+_HW_VETO_RE = re.compile(
+    r"\b(?:rf|radar|acoustics?|mechanical|flight\s+controls?|guidance|avionics|hydro|"
+    r"aircraft|civil|composites?|nuclear|grid|scada|manufacturing|assembly|propulsion|"
+    r"structures?|electrical|hardware|industrial|facilit(?:y|ies)|process|"
+    r"display\s+systems?|specialty|mbse|model[\s\-]+based\s+systems)\b",
+    re.IGNORECASE,
+)
+_HW_VETO_UNLESS_SOFTWARE_RE = re.compile(
+    r"\b(?:vehicles?|controls?|data[\s\-]*cent(?:er|re)s?)\b", re.IGNORECASE
+)
+_SOFTWARE_RE = re.compile(r"\bsoftware\b", re.IGNORECASE)
+# Phrases blanked before role matching: non-software "developer" titles ("Model
+# Developer" in bank model-risk, "Business Developer"), embedded HARDWARE and
+# machine-tool programming ("CNC Programmer Co-op", "PLC Programmer").
+_ROLE_VETO_RE = re.compile(
+    r"\b(?:(?:business|model|curriculum|content|product|publisher|real\s+estate)[\s\-]+developers?"
+    r"|embedded[\s\-]+hardware|(?:cnc|plc)[\s\-]+programm(?:er|ers|ing))\b",
+    re.IGNORECASE,
+)
+# French "stage" (internship) only in intern-shaped positions, so "Stage 0
+# Propellant", "Stage Systems" and "Late Stage Clinical" never count.
+_STAGE_RE = re.compile(r"^\s*stage\b|\bstage\s*[-:–(]|\ben\s+stage\b|\bstage\s+de\b", re.IGNORECASE)
 
 # A config role term containing one of these WORDS belongs to the product /
 # program-management group, which is out of launch scope. ("production engineer"
@@ -64,12 +108,14 @@ class _Rules:
     coop: re.Pattern
     intern: re.Pattern | None
     role: re.Pattern | None
+    amb_role: re.Pattern | None
     exclude: re.Pattern | None
     exempt: re.Pattern | None
     ca_terms: tuple[str, ...]
     us_terms: tuple[str, ...]
     ca_re: re.Pattern | None
     us_re: re.Pattern | None
+    hw_companies: frozenset[str]
 
 
 def _tier_country(key: str) -> str | None:
@@ -88,11 +134,14 @@ def _build_rules(
     exclude_terms: tuple[str, ...],
     exempt_terms: tuple[str, ...],
     tiers: tuple[tuple[str, tuple[str, ...]], ...],
+    hardware_heavy: tuple[str, ...] = (),
 ) -> _Rules:
-    coop = _any_re(COOP_TERMS)
+    coop = _any_re(COOP_TERMS, suffix="s?")
     assert coop is not None
     non_coop = [t for t in (intern_terms or tuple(_DEFAULT_INTERN_TERMS)) if not coop.search(t)]
     roles = [t for t in role_terms if not _is_pm_term(t)] + EXTRA_SWE_TERMS
+    amb = [t for t in roles if t.strip().lower() in AMBIGUOUS_ROLE_TERMS]
+    strong = [t for t in roles if t.strip().lower() not in AMBIGUOUS_ROLE_TERMS]
     excl = [t.strip() for t in exclude_terms if t.strip()] + SENIOR_TERMS
     ca: list[str] = []
     us: list[str] = []
@@ -104,13 +153,15 @@ def _build_rules(
     return _Rules(
         coop=coop,
         intern=_any_re(non_coop, suffix="s?"),
-        role=_any_re(roles, suffix="(?:s|ing)?"),
+        role=_any_re(strong, suffix="(?:s|ing)?"),
+        amb_role=_any_re(amb, suffix="(?:s|ing)?"),
         exclude=_any_re(excl, suffix="s?"),
         exempt=_any_re(list(exempt_terms)),
         ca_terms=tuple(ca),
         us_terms=tuple(us),
         ca_re=_any_re(ca),
         us_re=_any_re(us),
+        hw_companies=frozenset(c.strip().lower() for c in hardware_heavy if c.strip()),
     )
 
 
@@ -121,6 +172,7 @@ def _rules(criteria: Criteria, location_tiers: dict[str, list[str]]) -> _Rules:
         tuple(criteria.exclude_terms),
         tuple(criteria.exclude_exempt_terms),
         tuple((k, tuple(v)) for k, v in location_tiers.items()),
+        tuple(criteria.hardware_heavy_companies),
     )
 
 
@@ -220,6 +272,12 @@ _BOTH_RE = _any_re(_BOTH_NAMES)
 _FOREIGN_RE = _any_re(_FOREIGN_NAMES)
 _UK_TOKEN_RE = re.compile(r"\bUK\b")
 _CODE_RE = re.compile(r"\b[A-Z]{2}\b")
+# A "City, ST[ ZIP]" segment (whole location or one ';'-separated part) ending in one
+# of the omitted codes above is a US state ("Littleton, CO", "Longmont, CO 80501",
+# "Hillsboro,OR"). Multi-comma forms ("Bogota, DC, CO") don't qualify.
+_US_STATE_SEG_RE = re.compile(
+    r"(?:^|;)\s*[^,;]+,\s*(?:CO|IN|DE|OR|OK|ME|HI|AR)(?:\s+\d{5}(?:-\d{4})?)?\s*(?=;|$)"
+)
 # Terms in the tier lists that are countries/provinces/regions, not cities.
 _NOT_CITIES = {"canada", "ontario", "british columbia", "quebec", "remote"}
 
@@ -257,7 +315,14 @@ def _detect_location(location: str, rules: _Rules) -> _Loc:
 
     if re.search(r"\bU\.S\.", location):
         us = True
-    codes = set(_CODE_RE.findall(location))
+    # 2-letter codes only from segments with no foreign name: in "United Kingdom,
+    # Edinburgh, SC" the SC is Scotland, not South Carolina.
+    codes = {
+        code
+        for seg in re.split(r"[;|]", location)
+        if not ((_FOREIGN_RE and _FOREIGN_RE.search(seg.lower())) or _UK_TOKEN_RE.search(seg))
+        for code in _CODE_RE.findall(seg)
+    }
     if codes & _CA_CODES:
         ca = True
     if codes & _US_CODES:
@@ -268,6 +333,8 @@ def _detect_location(location: str, rules: _Rules) -> _Loc:
         ca = True
 
     foreign = bool((_FOREIGN_RE and _FOREIGN_RE.search(low)) or _UK_TOKEN_RE.search(location))
+    if not foreign and _US_STATE_SEG_RE.search(location):
+        us = True
     countries = [c for c, on in (("CA", ca), ("US", us)) if on]
     return _Loc(countries, cities, foreign)
 
@@ -290,6 +357,16 @@ class Classification:
     rules_version: int = RULES_VERSION
 
 
+def _ambiguous_is_swe(title: str, company: str | None, rules: _Rules) -> bool:
+    """An ambiguous role term counts as SWE: no hardware veto word, and a software
+    anchor in the title or a company outside the hardware-heavy set."""
+    if _HW_VETO_RE.search(title) or (
+        _HW_VETO_UNLESS_SOFTWARE_RE.search(title) and not _SOFTWARE_RE.search(title)
+    ):
+        return False
+    return bool(_ANCHOR_RE.search(title)) or (company or "").strip().lower() not in rules.hw_companies
+
+
 def classify(
     job: Job, criteria: Criteria, location_tiers: dict[str, list[str]]
 ) -> Classification:
@@ -301,10 +378,16 @@ def classify(
     level: str | None = None
     if rules.coop.search(title):
         level = "coop"
-    elif rules.intern and rules.intern.search(title):
+    elif (rules.intern and rules.intern.search(title)) or _STAGE_RE.search(title):
         level = "internship"
 
-    categories = ["swe"] if (rules.role and rules.role.search(title)) else []
+    role_title = _ROLE_VETO_RE.sub(" ", title)
+    swe = bool(rules.role and rules.role.search(role_title)) or bool(
+        rules.amb_role
+        and rules.amb_role.search(role_title)
+        and _ambiguous_is_swe(role_title, job.company, rules)
+    )
+    categories = ["swe"] if swe else []
 
     # exclusions run on the title with exempt phrases blanked out
     excl_title = rules.exempt.sub(" ", title) if rules.exempt else title

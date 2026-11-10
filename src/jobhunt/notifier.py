@@ -27,8 +27,11 @@ LOCATION_LABELS = {
 }
 MAX_EMBEDS_PER_MESSAGE = 10
 # Discord caps a message at 6000 embed chars; 10 embeds -> keep each under ~600.
-# Budget: title 120 + company 100 + location 100 + posted 60 + type 100 + names ~30.
-TITLE_MAX, COMPANY_MAX, LOCATION_MAX, POSTED_MAX, TYPE_MAX = 120, 100, 100, 60, 100
+# Budget: title 180 ("<company> — <position>") + priority ~20 + location 100 + posted 60
+# + type 100 + names ~30 (~490 worst case).
+TITLE_MAX, COMPANY_MAX, LOCATION_MAX, POSTED_MAX, TYPE_MAX = 180, 60, 100, 60, 100
+TITLE_SEP = " — "
+MIN_POSITION = 40  # the position is never clipped below this (COMPANY_MAX keeps it true)
 _MD_SPECIAL = re.compile(r"([\\*_~`|>\[\]()#<])")
 
 
@@ -88,15 +91,13 @@ def alert_embed(
     """v2 alert embed: no score / LLM reason, just the deterministic tags."""
     prio_label, color = PRIORITY_LABELS.get(company_priority, PRIORITY_LABELS[4])
     why = " · ".join([x for x in [level, *categories] if x]) or "-"
+    company = _clip(_md_escape(job.company), COMPANY_MAX)
+    room = max(TITLE_MAX - len(company) - len(TITLE_SEP), MIN_POSITION)
     embed = {
-        "title": _clip(job.title, TITLE_MAX),
+        "title": f"{company}{TITLE_SEP}{_clip(job.title, room)}",
         "color": color,
         "fields": [
-            {
-                "name": "Company",
-                "value": f"{_clip(_md_escape(job.company), COMPANY_MAX)} ({prio_label})",
-                "inline": True,
-            },
+            {"name": "Priority", "value": prio_label, "inline": True},
             {
                 "name": "Location",
                 "value": _clip(

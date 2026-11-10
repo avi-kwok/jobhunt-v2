@@ -33,6 +33,10 @@ _FIXED_HOSTS = {
     "gem": "api.gem.com",
     "jobvite": "jobs.jobvite.com",
     "deel": "jobs.deel.com",
+    "digitalrecruiters": "api.digitalrecruiters.com",
+    "epic": "careers.epic.com",
+    "rentec": "www.rentec.com",
+    "balyasny": "bambusdev.my.site.com",
 }
 
 # Per-tenant subdomain ATSes: requests (and so STATS) go to <slug>.<domain>, so the

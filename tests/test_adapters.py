@@ -495,6 +495,70 @@ def test_workday_facets_false_forces_search_terms():
     assert all(b["appliedFacets"] == {} for b in bodies)
 
 
+@respx.mock
+def test_workday_per_company_search_terms_and_applied_facets():
+    """Overrides replace SEARCH_TERMS and AND a country facet into every request."""
+    import json
+
+    bodies = []
+
+    def responder(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        return httpx.Response(200, json={"facets": [_FACETS[1]], "jobPostings": [_posting(1)]})
+
+    country = {"locationCountry": ["us-id", "ca-id"]}
+    respx.post(_WD_URL).mock(side_effect=responder)
+    jobs = WorkdayAdapter(client=httpx.Client()).fetch(
+        CompanyConfig(name="Acme", ats="workday", tenant="acme", wd="wd5", site="careers",
+                      workday_search_terms=["internship"], workday_applied_facets=country)
+    )
+    assert [j.external_id for j in jobs] == ["R1"]
+    # discovery (no intern facet found) + one override search, both country-filtered
+    assert [b["searchText"] for b in bodies] == ["", "internship"]
+    assert all(b["appliedFacets"] == country for b in bodies)
+
+
+@respx.mock
+def test_workday_applied_facets_merge_with_intern_facet():
+    import json
+
+    bodies = []
+
+    def responder(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        return httpx.Response(200, json={"facets": _FACETS, "jobPostings": []})
+
+    respx.post(_WD_URL).mock(side_effect=responder)
+    WorkdayAdapter(client=httpx.Client()).fetch(
+        CompanyConfig(name="Acme", ats="workday", tenant="acme", wd="wd5", site="careers",
+                      workday_applied_facets={"locationCountry": ["us-id"]})
+    )
+    assert bodies[1]["appliedFacets"] == {
+        "locationCountry": ["us-id"], "workerSubType": ["intern-ft", "coop-ft"]}
+
+
+def test_workday_overrides_load_from_resolved_yaml(tmp_path):
+    from jobhunt.config import load_config
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "criteria:\n  internship_terms: [intern]\n  role_terms: [software]\n"
+        "location_tiers:\n  local: [toronto]\n"
+        "companies:\n  - name: Acc\n"
+    )
+    resolved = tmp_path / "companies.resolved.yaml"
+    resolved.write_text(
+        "companies:\n"
+        "- {name: Acc, ats: workday, tenant: a, wd: wd1, site: S,\n"
+        "   workday_search_terms: [internship], workday_applied_facets: {locationCountry: [u]}}\n"
+    )
+    c = load_config(cfg_path, resolved).companies[0]
+    assert c.workday_search_terms == ["internship"]
+    assert c.workday_applied_facets == {"locationCountry": ["u"]}
+
+
 def test_workday_facets_flag_loads_from_resolved_yaml(tmp_path):
     from jobhunt.config import load_config
 
@@ -524,7 +588,7 @@ def test_workday_429_during_facet_discovery_retries_sequentially(monkeypatch):
     monkeypatch.setattr(workday_mod.time, "sleep", lambda *a, **k: None)
     calls = {"discover": 0, "workers": []}
 
-    def flaky_discover(self, url):
+    def flaky_discover(self, url, applied=None):
         calls["discover"] += 1
         if calls["discover"] == 1:
             raise httpx.HTTPStatusError(

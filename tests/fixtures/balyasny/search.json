@@ -1,0 +1,263 @@
+{
+ "actions": [
+  {
+   "id": "1;a",
+   "state": "SUCCESS",
+   "returnValue": {
+    "returnValue": [
+     {
+      "Id": "a0DUN00000GFcTa2AL",
+      "Name": "Applied AI Engineer (Summer Internship)",
+      "Publish_Title__c": "Applied AI Engineer (Summer Internship)",
+      "Department__c": "Data",
+      "Experience_Level__c": "Internships",
+      "Posted_Ago__c": "Posted 28 Days Ago",
+      "Requisition_Number__c": "REQ8693",
+      "Job_Req_Title_in_URL__c": "Applied-AI-Engineer--Summer-Internship-",
+      "Primary_Recruiter__c": "a12UN00000A54DMYAZ",
+      "Job_Requisition_Roles__r": [
+       {
+        "Job_Requisition__c": "a0DUN00000GFcTa2AL",
+        "Id": "a0CUN00004UA9Pc2AL",
+        "Employee__c": "a12UN000009Uo5TYAS",
+        "Employee__r": {
+         "Name": "Employee Name",
+         "Id": "a12UN000009Uo5TYAS"
+        }
+       }
+      ],
+      "Job_Requisition_Positions__r": [
+       {
+        "Job_Requisition__c": "a0DUN00000GFcTa2AL",
+        "Id": "a1AUN000004m1tx2AA",
+        "Location__c": "a112E000006dKEFQA2",
+        "Location__r": {
+         "External_Name__c": "New York",
+         "Id": "a112E000006dKEFQA2"
+        }
+       }
+      ],
+      "Primary_Recruiter__r": {
+       "Name": "Recruiter Name",
+       "Id": "a12UN00000A54DMYAZ"
+      }
+     },
+     {
+      "Id": "a0DUN00000G2V892AF",
+      "Name": "Geopolitical Policy Strategist - Global Affairs (Winter & Summer Internship)",
+      "Publish_Title__c": "Geopolitical Policy Strategist - Global Affairs (Winter & Summer Internship)",
+      "Department__c": "Global Affairs",
+      "Experience_Level__c": "Internships",
+      "Posted_Ago__c": "Posted 48 Days Ago",
+      "Requisition_Number__c": "REQ8626",
+      "Job_Req_Title_in_URL__c": "Geopolitical-Policy-Strategist---Global-Affairs--Winter---Summer-Internship-",
+      "Primary_Recruiter__c": "a124U00001LTNPqQAP",
+      "Job_Requisition_Roles__r": [
+       {
+        "Job_Requisition__c": "a0DUN00000G2V892AF",
+        "Id": "a0CUN00004MqnWX2AZ",
+        "Employee__c": "a12UN000005F8wzYAC",
+        "Employee__r": {
+         "Name": "Employee Name",
+         "Id": "a12UN000005F8wzYAC"
+        }
+       }
+      ],
+      "Job_Requisition_Positions__r": [
+       {
+        "Job_Requisition__c": "a0DUN00000G2V892AF",
+        "Id": "a1AUN000004e2SD2AY",
+        "Location__c": "a112E000006dKEFQA2",
+        "Location__r": {
+         "External_Name__c": "New York",
+         "Id": "a112E000006dKEFQA2"
+        }
+       }
+      ],
+      "Primary_Recruiter__r": {
+       "Name": "Recruiter Name",
+       "Id": "a124U00001LTNPqQAP"
+      }
+     },
+     {
+      "Id": "a0DUN00000FaQhh2AF",
+      "Name": "Summer Associate, Software Engineering",
+      "Publish_Title__c": "Software Engineering (Summer Internship)",
+      "Department__c": "Technology",
+      "Experience_Level__c": "Internships",
+      "Posted_Ago__c": "Posted 88 Days Ago",
+      "Requisition_Number__c": "REQ8446",
+      "Job_Req_Title_in_URL__c": "Software-Engineering--Summer-Internship-",
+      "Primary_Recruiter__c": "a124U00001LTNPqQAP",
+      "Job_Requisition_Roles__r": [
+       {
+        "Job_Requisition__c": "a0DUN00000FaQhh2AF",
+        "Id": "a0CUN000046YJqb2AG",
+        "Employee__c": "a12UN000006GNIPYA4",
+        "Employee__r": {
+         "Name": "Employee Name",
+         "Id": "a12UN000006GNIPYA4"
+        }
+       }
+      ],
+      "Job_Requisition_Positions__r": [
+       {
+        "Job_Requisition__c": "a0DUN00000FaQhh2AF",
+        "Id": "a1AUN000004J8vd2AC",
+        "Location__c": "a112E000006dKDyQAM",
+        "Location__r": {
+         "External_Name__c": "Hong Kong",
+         "Id": "a112E000006dKDyQAM"
+        }
+       },
+       {
+        "Job_Requisition__c": "a0DUN00000FaQhh2AF",
+        "Id": "a1AUN000004J8ve2AC",
+        "Location__c": "a112E000006dKDyQAM",
+        "Location__r": {
+         "External_Name__c": "Hong Kong",
+         "Id": "a112E000006dKDyQAM"
+        }
+       },
+       {
+        "Job_Requisition__c": "a0DUN00000FaQhh2AF",
+        "Id": "a1AUN000004J8vf2AC",
+        "Location__c": "a112E000006dKDyQAM",
+        "Location__r": {
+         "External_Name__c": "Hong Kong",
+         "Id": "a112E000006dKDyQAM"
+        }
+       },
+       {
+        "Job_Requisition__c": "a0DUN00000FaQhh2AF",
+        "Id": "a1AUN000004J8vg2AC",
+        "Location__c": "a112E000006dKDyQAM",
+        "Location__r": {
+         "External_Name__c": "Hong Kong",
+         "Id": "a112E000006dKDyQAM"
+        }
+       },
+       {
+        "Job_Requisition__c": "a0DUN00000FaQhh2AF",
+        "Id": "a1AUN000004J8vh2AC",
+        "Location__c": "a112E000006dKEKQA2",
+        "Location__r": {
+         "External_Name__c": "Singapore",
+         "Id": "a112E000006dKEKQA2"
+        }
+       }
+      ],
+      "Primary_Recruiter__r": {
+       "Name": "Recruiter Name",
+       "Id": "a124U00001LTNPqQAP"
+      }
+     },
+     {
+      "Id": "a0DUN00000DO5782AD",
+      "Name": "TCNE - Techne Senior Analyst / APM - Singapore/ Hong Kong/ Tokyo",
+      "Publish_Title__c": "Asia TECHNE Senior Analyst / APM - Singapore/ Hong Kong/ Tokyo",
+      "Department__c": "Investment Professionals",
+      "Experience_Level__c": "Experience Professionals",
+      "Posted_Ago__c": "Posted Today",
+      "Requisition_Number__c": "REQ7783",
+      "Job_Req_Title_in_URL__c": "Asia-TECHNE-Senior-Analyst---APM---Singapore--Hong-Kong--Tokyo",
+      "Primary_Recruiter__c": "a124U00001Ms3dyQAB",
+      "Job_Requisition_Roles__r": [
+       {
+        "Job_Requisition__c": "a0DUN00000DO5782AD",
+        "Id": "a0CUN00003BGoXZ2A1",
+        "Employee__c": "a12UN0000079EhLYAU",
+        "Employee__r": {
+         "Name": "Employee Name",
+         "Id": "a12UN0000079EhLYAU"
+        }
+       }
+      ],
+      "Job_Requisition_Positions__r": [
+       {
+        "Job_Requisition__c": "a0DUN00000DO5782AD",
+        "Id": "a1AUN000003CN8r2AG",
+        "Location__c": "a112E000006dKEKQA2",
+        "Job_Requisition_Position_Locations__r": [
+         {
+          "Job_Requisition_Position__c": "a1AUN000003CN8r2AG",
+          "Id": "a19UN00000Poc8ZYAR",
+          "Location__c": "a112E000006dKDyQAM",
+          "Location__r": {
+           "External_Name__c": "Hong Kong",
+           "Id": "a112E000006dKDyQAM"
+          }
+         },
+         {
+          "Job_Requisition_Position__c": "a1AUN000003CN8r2AG",
+          "Id": "a19UN00000Poc8aYAB",
+          "Location__c": "a112E000006dKE9QAM",
+          "Location__r": {
+           "External_Name__c": "Japan",
+           "Id": "a112E000006dKE9QAM"
+          }
+         }
+        ],
+        "Location__r": {
+         "External_Name__c": "Singapore",
+         "Id": "a112E000006dKEKQA2"
+        }
+       },
+       {
+        "Job_Requisition__c": "a0DUN00000DO5782AD",
+        "Id": "a1AUN000003CN8s2AG",
+        "Location__c": "a112E000006dKEKQA2",
+        "Job_Requisition_Position_Locations__r": [
+         {
+          "Job_Requisition_Position__c": "a1AUN000003CN8s2AG",
+          "Id": "a19UN00000Poc8bYAB",
+          "Location__c": "a112E000006dKDyQAM",
+          "Location__r": {
+           "External_Name__c": "Hong Kong",
+           "Id": "a112E000006dKDyQAM"
+          }
+         },
+         {
+          "Job_Requisition_Position__c": "a1AUN000003CN8s2AG",
+          "Id": "a19UN00000Poc8cYAB",
+          "Location__c": "a112E000006dKE9QAM",
+          "Location__r": {
+           "External_Name__c": "Japan",
+           "Id": "a112E000006dKE9QAM"
+          }
+         }
+        ],
+        "Location__r": {
+         "External_Name__c": "Singapore",
+         "Id": "a112E000006dKEKQA2"
+        }
+       }
+      ],
+      "Primary_Recruiter__r": {
+       "Name": "Recruiter Name",
+       "Id": "a124U00001Ms3dyQAB"
+      }
+     }
+    ],
+    "cacheable": true
+   },
+   "error": [],
+   "storable": true
+  },
+  {
+   "id": "COOSE",
+   "coos": "This page has changes since the last refresh. To get the latest updates, save your work and finish your conversations before refreshing the page.",
+   "state": "SUCCESS"
+  }
+ ],
+ "context": {
+  "mode": "PROD",
+  "app": "siteforce:communityApp",
+  "contextPath": "/s/sfsites",
+  "pathPrefix": "",
+  "fwuid": "NjZ1S2dpaDFCTURrSEliQmh0ZXRhZ2tVMjdnTGFERUU2S3FfSVdrcU92bkExNS4zLjE2MDEw",
+  "loaded": {
+   "APPLICATION@markup://siteforce:communityApp": "1913_ebdeTt9njw4JArw_mL8PvA"
+  }
+ }
+}

@@ -40,7 +40,11 @@ PORTAL_PAGE = 50
 PORTAL_MAX_PAGES = 5
 
 DEFAULT_DELAY = 1.0
-DELAYS = {"careers.amd.com": 5.0}  # robots.txt crawl-delay
+DELAYS = {  # robots.txt crawl-delay
+    "careers.amd.com": 5.0,
+    "careers.garmin.com": 5.0,
+    "careers.kpmg.ca": 5.0,
+}
 
 ATLASSIAN_HOST = "www.atlassian.com"
 ATLASSIAN_URL = f"https://{ATLASSIAN_HOST}/endpoint/careers/listings"

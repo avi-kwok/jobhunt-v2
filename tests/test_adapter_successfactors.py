@@ -96,3 +96,10 @@ def test_no_marker_still_raises():
     respx.get(URL).mock(return_value=httpx.Response(200, text="<html><body>Access denied</body></html>"))
     with pytest.raises(ValueError, match="no results container"):
         run()
+
+
+@respx.mock
+def test_unify_shell_raises_pointing_to_sitemap_adapter():
+    respx.get(URL).mock(return_value=httpx.Response(200, text=fx("unify_search.html")))
+    with pytest.raises(ValueError, match="successfactors_sitemap"):
+        run()

@@ -1,0 +1,37 @@
+<!DOCTYPE html><html><head><title>Search Jobs | Seagate Technology</title>
+<link type="text/css" rel="stylesheet" href="/platform/css/j2w/min/sitebuilderframeworkunify.min.css?h=275f70e9" />
+</head>
+<body class="coreCSB search-page body unify body" id="body">
+<div id="outershell"></div>
+<script type="text/javascript">
+var unifyBuildVersion = "RMK/j2w-all-multibranch-CI/b2605.31";
+          var unifyTag = "master";
+          if(unifyBuildVersion.lastIndexOf('/') > 0) {
+            unifyTag = unifyBuildVersion.substring(unifyBuildVersion.lastIndexOf('/') + 1);
+          }
+          var unifyWidgetMetaTagContent = {
+            "xweb/rmk-jobs-search": {
+              resourceMapping: {
+                "xweb/common-messagebundles/i18n/common-components/messagebundle.properties": "https://hcm41.sapsf.com/messagebundle/_/vmod_3/common!/verp/ui/common-messagebundles/resources/i18n/common-components/messagebundle.properties"
+              },
+              manifest: {
+                "async": true,
+                "path": "asset-manifest-entrypoints.json?tag="+ unifyTag
+              },
+              root: {
+                verp : {
+                  baseUrl: "https://hcm41.sapsf.com/verp/vmod_3",
+                  module: "rmk-jobs-search",
+                  tag: unifyTag
+                }
+              }
+            }
+          };
+          /* Set the widget meta tag */
+          var unifyWidgetMetaTag =  document.querySelector("meta[name='xweb-widgets']") || document.createElement("meta");
+          unifyWidgetMetaTag.setAttribute('name', 'xweb-widgets');
+          unifyWidgetMetaTag.setAttribute('content', JSON.stringify(unifyWidgetMetaTagContent));
+          document.head.appendChild(unifyWidgetMetaTag);
+        </script>
+<script type="text/javascript" src="/platform/js/j2w/min/j2w.searchResultsUnify.min.js?h=275f70e9"></script>
+</body></html>

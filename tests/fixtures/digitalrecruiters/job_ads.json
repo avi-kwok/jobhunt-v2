@@ -1,0 +1,71 @@
+{
+ "count": 3,
+ "items": [
+  {
+   "id": "4686577-97077009",
+   "job_ad_id": 4686577,
+   "title": "Architectural project manager (freelance)",
+   "contract": "Permanent contract",
+   "location": "Montréal",
+   "job": "",
+   "url": "4686577-architectural-project-manager-freelance-h2v-4h8-montreal",
+   "score": 0,
+   "brand_id": 4511,
+   "is_external": false,
+   "is_aggregated": false,
+   "career_domain": "jobs.momentfactory.com",
+   "careers_site_url": null,
+   "broadcast_hash": null
+  },
+  {
+   "id": "4682875-92893615",
+   "job_ad_id": 4682875,
+   "title": "Project manager",
+   "contract": "Permanent contract",
+   "location": "Montréal",
+   "job": "Project Manager",
+   "url": "4682875-project-manager-h2v-4h8-montreal",
+   "score": 0,
+   "brand_id": 4511,
+   "is_external": false,
+   "is_aggregated": false,
+   "career_domain": "jobs.momentfactory.com",
+   "careers_site_url": null,
+   "broadcast_hash": null
+  },
+  {
+   "id": "4661833-92894229",
+   "job_ad_id": 4661833,
+   "title": "Project Coordinator",
+   "contract": "Permanent contract",
+   "location": "Montréal",
+   "job": "Project Coordinator",
+   "url": "4661833-project-coordinator-h2v-4h8-montreal",
+   "score": 0,
+   "brand_id": 4511,
+   "is_external": false,
+   "is_aggregated": false,
+   "career_domain": "jobs.momentfactory.com",
+   "careers_site_url": null,
+   "broadcast_hash": null
+  }
+ ],
+ "filters": {
+  "jobs": [
+   {
+    "id": 755349,
+    "count": 1,
+    "name": "Business Development Manager",
+    "merged_ids": "755349"
+   }
+  ],
+  "contractTypes": [
+   {
+    "id": 14,
+    "count": 1,
+    "name": "Fixed-term contract"
+   }
+  ]
+ },
+ "viewport": null
+}

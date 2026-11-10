@@ -11,17 +11,17 @@ from jobhunt.models import Job
 CFG = load_config(Path("config.yaml"), resolved_path=Path("/nonexistent.yaml"))
 
 
-def cls(title, location=None, description=None):
+def cls(title, location=None, description=None, company="X"):
     job = Job(
-        source="x", company="X", external_id="1", title=title, url="u",
+        source="x", company=company, external_id="1", title=title, url="u",
         location=location, description=description,
     )
     return classify(job, CFG.criteria, CFG.location_tiers)
 
 
 def test_rules_version():
-    assert RULES_VERSION == 1
-    assert cls("Software Engineer Intern").rules_version == 1
+    assert RULES_VERSION == 2
+    assert cls("Software Engineer Intern").rules_version == 2
 
 
 @pytest.mark.parametrize(
@@ -61,7 +61,7 @@ def test_rejected_titles(title):
         "iOS Intern",
         "Machine Learning Engineer Intern",
         "Security Engineer Co-op",
-        "Production Engineer Intern",
+        "Production Engineer Intern (Cloud Infrastructure)",
         "Firmware Intern",
         "Android Developer Internship",
     ],
@@ -180,3 +180,183 @@ def test_bare_mobile_is_not_swe(title):
 ])
 def test_mobile_swe_phrases_eligible(title):
     assert cls(title, "Toronto, ON").eligible
+
+
+# ---- RULES_VERSION 2: SWE-only precision + recall fixes ----------------------
+
+@pytest.mark.parametrize("title", [
+    # ambiguous discipline names with a hardware-discipline veto word (any company)
+    "Radar Systems Engineer - Intern",
+    "Acoustic Systems Engineering Co-op",
+    "Flight Controls Systems Engineer Intern",
+    "Industrial Automation Engineer Intern",
+    "Facilities Controls and Automation Engineering Intern",
+    "Display Systems Engineering Co-Op (Summer/Fall 2027) - Onsite",
+    "Mississauga Intern, Systems Engineering Hydro Mechanics (Winter 2027)",
+    "Automation Engineer Intern - Electrical",
+    "Systems Engineer (Specialty) - Intern",
+    "Data Center Infrastructure Engineer Internship 2027",
+    "Intern, Model Based Systems Engineering",
+    "Vehicle Systems Engineer Intern",
+    "Embedded Hardware Engineer Intern",
+    # non-software "developer"
+    "Model Developer Intern",
+    "Business Developer Intern",
+    "Curriculum Developer Intern",
+    "Content Developer Co-op",
+    "Product Developer Intern",
+    "Real Estate Developer Intern",
+    "CNC Programmer Co-op - Spring 2027",
+    "PLC Programming Intern",
+    # bare French "stage" outside intern positions
+    "Launch Engineer, Stage 0 Propellant Generation",
+    "Propulsion Engineer, Stage Systems",
+    "Oncology Late Stage Clinical Development Scientist",
+    "HR Stage",
+    "PhD Software Engineer Intern",
+])
+def test_v2_rejected(title):
+    c = cls(title, "Denver, CO")
+    assert not c.eligible, (title, c.categories, c.level)
+
+
+@pytest.mark.parametrize("title", [
+    "IT Systems Engineer Intern",
+    "IT Platform Engineer Intern",
+    "Software Systems Engineer Co-op",
+    "Cloud Infrastructure Engineer Intern",
+    "Test Automation Engineer Intern",
+    "Software Automation Co-op",
+    "Front End Engineer Intern",
+    "Frontend Developer Intern",
+    "Embedded Engineer Intern",
+    "Software Intern",
+    "Software Internship - Summer 2027",
+    "Software QA Intern",
+    "Software Test Co-op",
+    "Software Tools Intern",
+    "Quantitative Developer Intern",
+    "AI Developer Co-op",
+    "AI Engineer Intern",
+    "ML Engineer Intern",
+    "Machine Learning Intern",
+    "Developer Intern",
+    "Programmer Intern",
+    "Cybersecurity Intern",
+    "Cyber Engineer Co-op",
+    "Software Engineering Co-ops (Fall 2027)",
+    "2027 Winter Co-Ops - Software Development",
+    "Software Engineer Intern - BS/MS/PhD",
+    "Software Engineering Intern (MS/PhD)",
+    "Stagiaire, Développement logiciel (Hiver 2027)",
+    "Stagiaire Programmation de Moteur - Beenox (Hiver 2027)",
+    "Stage - Développeur Web",
+    "Stage en développement logiciel",
+    "Werkstudent Software Engineering",
+])
+def test_v2_eligible(title):
+    c = cls(title, "Toronto, ON")
+    assert c.eligible, (title, c.reject_reason)
+    assert c.categories == ["swe"]
+
+
+# ---- ambiguous role terms: veto word / software anchor / hardware-heavy company ----
+
+@pytest.mark.parametrize("company,title", [
+    ("RTX", "CH-53K Systems Engineering Co-Op - Summer/Fall 2027 - Onsite"),
+    ("RTX", "Systems Engineering Intern (Summer 2027)"),
+    ("Lockheed Martin", "Radar Systems Engineer - Intern"),
+    ("Lockheed Martin", "Systems Engineer - Intern"),
+    ("Northrop Grumman", "2027 Systems Engineering Intern - Colorado Springs CO"),
+    ("Bose", "Acoustic Systems Engineering Co-op"),
+    ("Garmin", "Flight Controls Systems Engineer Intern"),
+    ("Garmin", "Aviation Systems Engineer Intern"),
+    ("Texas Instruments", "Facilities Controls and Automation Engineering Intern"),
+    ("Texas Instruments", "Systems Engineering Intern"),
+    ("Accenture", "Industrial Automation Engineer Intern"),
+    ("Analog Devices", "System Integration Engineer Intern"),
+    ("Anduril", "2027 Systems Engineer Intern"),
+    ("SpaceX", "Integration Engineer Intern (Super Heavy Booster)"),
+    ("SpaceX", "Build Engineer Intern (Starship)"),
+    ("SpaceX", "Production Engineer Intern (Starship Electronics)"),
+    ("Micron", "Intern - Front-End Materials Procurement Operations"),
+    ("Lockheed Martin", "Platform Engineer Intern"),  # same title is in at DRW
+    ("lockheed martin", "Platform Engineer Intern"),  # company match is case-insensitive
+])
+def test_ambiguous_rejected_at_hardware_heavy_or_vetoed(company, title):
+    c = cls(title, "Denver, CO", company=company)
+    assert not c.eligible and c.reject_reason == "no swe-category term in title", (company, title)
+
+
+@pytest.mark.parametrize("company,title", [
+    ("DRW", "Platform Engineer Intern"),
+    ("Schonfeld", "2027 Platform Engineering Intern"),
+    ("Palantir", "Forward Deployed Infrastructure Engineer, Internship - US Government"),
+    ("Later", "AI Automation Engineer Co-op"),
+    ("Akuna Capital", "Platform Engineer Intern, Summer 2027"),
+    ("Jump Trading", "Campus Systems Engineer (Intern)"),
+    ("X", "Platform Engineering Intern"),
+    # a software anchor counts even at a hardware-heavy employer
+    ("Lockheed Martin", "Systems Engineering/IT-Intern"),
+    ("RTX", "Software Systems Engineer Co-op"),
+    ("Marvell", "AI-Native Development Platform Engineer Intern, MS - Summer 2027"),
+    ("General Motors", "Vehicle Software Integration Engineer Intern"),  # software lifts the vehicle veto
+])
+def test_ambiguous_accepted_at_software_firm_or_with_anchor(company, title):
+    c = cls(title, "Denver, CO", company=company)
+    assert c.eligible and c.categories == ["swe"], (company, title, c.reject_reason)
+
+
+def test_ambiguous_veto_word_beats_software_firm_and_anchor():
+    # the veto applies at software firms too, and even when a software anchor is present
+    assert not cls("Radar Systems Engineer - Intern", company="DRW").eligible
+    assert not cls("Hardware Platform Engineer Intern, AI", company="DRW").eligible
+    # strong role terms are never vetoed
+    assert cls("Hardware Software Engineer Intern", company="RTX").eligible
+
+
+def test_hardware_heavy_companies_configured():
+    hw = set(CFG.criteria.hardware_heavy_companies)
+    watch = {c.name for c in CFG.companies}
+    assert {"RTX", "Lockheed Martin", "Bose", "Garmin", "Texas Instruments", "Accenture"} <= hw
+    assert hw <= watch, hw - watch  # exact watchlist names
+    assert not {"DRW", "Schonfeld", "Palantir", "Later"} & hw
+
+
+def test_coop_plural_level():
+    assert cls("2027 Winter Co-Ops - Software Development - Demonware").level == "coop"
+
+
+def test_stage_level_only_in_intern_positions():
+    assert cls("Stage - Développeur").level == "internship"
+    assert cls("Stage de développement logiciel").level == "internship"
+    assert cls("Propulsion Engineer, Stage Systems").level is None
+
+
+@pytest.mark.parametrize("loc", [
+    "Littleton, CO", "Highlands Ranch, CO; Louisville, CO", "Longmont, CO 80501",
+    "Hillsboro,OR", "Camden, AR", "USA - Dover, DE", "Indianapolis, IN 46204",
+    "Honolulu, HI", "Portland, ME", "Tulsa, OK",
+])
+def test_omitted_state_codes_as_city_state_segment(loc):
+    c = cls("Software Engineer Intern - Summer 2027", loc)
+    assert c.countries == ["US"] and c.eligible, loc
+
+
+@pytest.mark.parametrize("loc", ["Bogotá, Colombia", "Pune, India", "Medellin, CO, Colombia"])
+def test_state_code_rule_does_not_claim_foreign(loc):
+    c = cls("Software Engineer Intern", loc)
+    assert "US" not in c.countries and not c.eligible, loc
+
+
+@pytest.mark.parametrize("loc", ["Flexible - Any SpaceX Site", "Any SpaceX Site", "Flexible"])
+def test_spacex_flexible_location_is_opaque(loc):
+    c = cls("Summer 2027 Software Engineering Internship/Co-op", loc)
+    assert c.location_opaque and c.eligible
+
+
+def test_state_code_ignored_inside_foreign_segment():
+    c = cls("Software Tools Engineering Intern", "United Kingdom, Edinburgh, SC, Freer")
+    assert c.countries == [] and not c.eligible
+    # a US segment next to a foreign one still counts
+    assert cls("Software Engineer Intern", "Austin, TX; Bangalore, India").countries == ["US"]

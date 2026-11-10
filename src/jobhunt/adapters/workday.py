@@ -164,16 +164,21 @@ class WorkdayAdapter(Adapter):
         then one empty-searchText search per intern-like facet parameter. Falls
         back to the SEARCH_TERMS phrase searches when the board has no intern
         facet or the company opts out with ``workday_facets: false``.
+        ``workday_search_terms`` replaces SEARCH_TERMS for that board, and
+        ``workday_applied_facets`` is ANDed into every request (e.g. a CA/US
+        locationCountry filter for a huge global board).
         """
+        base = dict(company.workday_applied_facets or {})
         if company.workday_facets is not False:
-            facets = self._discover_facets(url)
+            facets = self._discover_facets(url, base)
             applied = find_intern_facets(facets)
             if applied:
-                return [("", {param: ids}) for param, ids in applied.items()]
-        return [(term, {}) for term in SEARCH_TERMS]
+                return [("", {**base, param: ids}) for param, ids in applied.items()]
+        terms = company.workday_search_terms or SEARCH_TERMS
+        return [(term, dict(base)) for term in terms]
 
-    def _discover_facets(self, url: str) -> list[dict]:
-        body = {"appliedFacets": {}, "limit": PAGE_LIMIT, "offset": 0, "searchText": ""}
+    def _discover_facets(self, url: str, applied: dict[str, list[str]] | None = None) -> list[dict]:
+        body = {"appliedFacets": applied or {}, "limit": PAGE_LIMIT, "offset": 0, "searchText": ""}
         resp = request_with_retry(self.client, "POST", url, json=body, headers=_HEADERS)
         resp.raise_for_status()
         return resp.json().get("facets") or []

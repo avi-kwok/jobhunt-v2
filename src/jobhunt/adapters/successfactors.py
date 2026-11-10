@@ -121,6 +121,11 @@ class SuccessFactorsAdapter(Adapter):
                 resp.raise_for_status()
                 rows = parse_results(resp.text)
                 if not rows and not any(m in resp.text for m in _MARKERS):
+                    if "rmk-jobs-search" in resp.text:  # client-rendered RMK "Unify" shell
+                        raise ValueError(
+                            f"{company.name}: RMK Unify site (no server-rendered rows); "
+                            "use ats: successfactors_sitemap"
+                        )
                     raise ValueError(f"{company.name}: successfactors page has no results container")
                 for r in rows:
                     m = _ID_RE.search(r["href"])

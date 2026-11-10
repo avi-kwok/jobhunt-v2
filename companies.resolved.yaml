@@ -1506,3 +1506,376 @@ companies:
   priority: 4
   ats: smartrecruiters
   slug: Ubisoft2
+# --- 2026-11-10: batch 3 (research + new adapters balyasny/digitalrecruiters/epic/njoyn/rentec/successfactors_sitemap), all live-verified ---
+- name: Duolingo
+  priority: 2
+  ats: greenhouse
+  slug: duolingo
+- name: Airtable
+  priority: 2
+  ats: greenhouse
+  slug: airtable
+- name: Waymo
+  priority: 2
+  ats: greenhouse
+  slug: waymo
+- name: Nuro
+  priority: 2
+  ats: greenhouse
+  slug: nuro
+- name: Zoox
+  priority: 2
+  ats: lever
+  slug: zoox
+- name: SpaceX
+  priority: 2
+  ats: greenhouse
+  slug: spacex
+- name: Anduril
+  priority: 2
+  ats: greenhouse
+  slug: andurilindustries
+- name: Linear
+  priority: 2
+  ats: ashby
+  slug: linear
+- name: Retool
+  priority: 2
+  ats: gem
+  slug: retool
+- name: Nextdoor
+  priority: 4
+  ats: greenhouse
+  slug: nextdoor
+- name: Quora
+  priority: 4
+  ats: ashby
+  slug: quora
+- name: Zillow
+  priority: 3
+  ats: workday
+  tenant: zillow
+  wd: wd5
+  site: Zillow_Group_External
+- name: Chewy
+  priority: 4
+  ats: phenom
+  slug: CHINUS
+  site: us/en
+  host: careers.chewy.com
+- name: Peloton
+  priority: 4
+  ats: greenhouse
+  slug: peloton
+- name: Activision Blizzard
+  priority: 3
+  ats: workday
+  tenant: xboxgaming
+  wd: wd1
+  site: External
+- name: Blizzard
+  priority: 4
+  ats: workday
+  tenant: xboxgaming
+  wd: wd1
+  site: Blizzard_External_Careers
+- name: Nintendo
+  priority: 4
+  ats: greenhouse
+  slug: nintendo
+- name: Sony
+  priority: 4
+  ats: workday
+  tenant: sonyglobal
+  wd: wd1
+  site: SonyGlobalCareers
+- name: Sony Interactive Entertainment
+  priority: 4
+  ats: greenhouse
+  slug: sonyinteractiveentertainmentglobal
+- name: Lockheed Martin
+  priority: 3
+  ats: eightfold
+  slug: lockheedmartin.com
+  host: lockheedmartin.eightfold.ai
+- name: Northrop Grumman
+  priority: 3
+  ats: eightfold
+  slug: ngc.com
+  host: jobs.northropgrumman.com
+- name: Boeing
+  priority: 3
+  ats: workday
+  tenant: boeing
+  wd: wd1
+  site: EXTERNAL_CAREERS
+  # Fuzzy searchText matched ~the whole 720-job board with SEARCH_TERMS (178 s/scan).
+  # CA/US country facet + two narrow terms (2026-11-10: ~6-25 pages).
+  workday_facets: false
+  workday_search_terms: [internship, student]
+  workday_applied_facets:
+    locationCountry: [bc33aa3152ec42d4995f4791a106ed09, a30a87ed25634629aa6c3958aa2b91ea]  # United States of America, Canada
+- name: RTX
+  priority: 3
+  ats: workday
+  tenant: globalhr
+  wd: wd5
+  site: REC_RTX_Ext_Gateway
+- name: General Motors
+  priority: 3
+  ats: workday
+  tenant: generalmotors
+  wd: wd5
+  site: Careers_GM
+- name: Ford
+  priority: 3
+  ats: oraclehcm
+  site: CX_1
+  host: efds.fa.em5.oraclecloud.com
+- name: Lucid Motors
+  priority: 3
+  ats: greenhouse
+  slug: lucidmotors
+- name: Motional
+  priority: 3
+  ats: greenhouse
+  slug: motional
+- name: Hugging Face
+  priority: 2
+  ats: workable
+  slug: huggingface
+- name: xAI
+  priority: 2
+  ats: greenhouse
+  slug: xai
+- name: Mistral AI
+  priority: 2
+  ats: ashby
+  slug: mistral.ai
+- name: Character.AI
+  priority: 2
+  ats: ashby
+  slug: character
+- name: Runway
+  priority: 2
+  ats: ashby
+  slug: runway-ml
+- name: Jasper
+  priority: 3
+  ats: ashby
+  slug: Jasper AI
+- name: Sumo Logic
+  priority: 3
+  ats: greenhouse
+  slug: sumologic
+- name: Garmin
+  priority: 4
+  ats: icims
+  host: careers.garmin.com
+- name: Bose
+  priority: 4
+  ats: phenom
+  slug: BCRBCSUS
+  site: us/en
+  host: careers.bose.com
+- name: Texas Instruments
+  priority: 3
+  ats: oraclehcm
+  site: CX
+  host: edbz.fa.us2.oraclecloud.com
+- name: Analog Devices
+  priority: 4
+  ats: workday
+  tenant: analogdevices
+  wd: wd1
+  site: External
+- name: Micron
+  priority: 3
+  ats: eightfold
+  slug: micron.com
+  host: careers.micron.com
+- name: Western Digital
+  priority: 4
+  ats: smartrecruiters
+  slug: WesternDigital
+- name: Marvell
+  priority: 3
+  ats: workday
+  tenant: marvell
+  wd: wd1
+  site: MarvellCareers
+- name: Lam Research
+  priority: 3
+  ats: eightfold
+  slug: lamresearch.com
+  host: careers.lamresearch.com
+- name: Applied Materials
+  priority: 3
+  ats: eightfold
+  slug: appliedmaterials.com
+  host: careers.appliedmaterials.com
+- name: Siemens
+  priority: 4
+  ats: avature
+  site: en_US/externaljobs/SearchJobs
+  host: jobs.siemens.com
+- name: Honeywell
+  priority: 4
+  ats: oraclehcm
+  site: CX_1
+  host: ibqbjb.fa.ocs.oraclecloud.com
+- name: GE Aerospace
+  priority: 4
+  ats: phenom
+  slug: GAOGAYGLOBAL
+  site: global/en
+  host: careers.geaerospace.com
+- name: Caterpillar
+  priority: 4
+  ats: workday
+  tenant: cat
+  wd: wd5
+  site: CaterpillarCareers
+- name: John Deere
+  priority: 4
+  ats: eightfold
+  slug: johndeere.com
+  host: johndeere.eightfold.ai
+- name: 3M
+  priority: 4
+  ats: workday
+  tenant: 3m
+  wd: wd1
+  site: Search
+  # No intern facet; fuzzy SEARCH_TERMS pulled 720 jobs (92 s). All 3M intern
+  # titles start "Internship - ..." (2026-11-10: 23 hits, 2 requests).
+  workday_facets: false
+  workday_search_terms: [internship]
+  workday_applied_facets:
+    Location_Country: [bc33aa3152ec42d4995f4791a106ed09, a30a87ed25634629aa6c3958aa2b91ea]  # United States of America, Canada
+- name: Johnson & Johnson
+  priority: 4
+  ats: workday
+  tenant: jj
+  wd: wd5
+  site: JJ
+- name: Pfizer
+  priority: 4
+  ats: workday
+  tenant: pfizer
+  wd: wd1
+  site: PfizerCareers
+- name: Moderna
+  priority: 4
+  ats: workday
+  tenant: modernatx
+  wd: wd1
+  site: M_tx
+- name: Old Mission
+  priority: 2
+  ats: ashby
+  slug: old-mission-capital
+- name: Wolverine Trading
+  priority: 2
+  ats: pinpoint
+  slug: wolve
+- name: Belvedere Trading
+  priority: 2
+  ats: lever
+  slug: belvederetrading
+- name: Flow Traders
+  priority: 2
+  ats: greenhouse
+  slug: flowtraders
+- name: Bridgewater Associates
+  priority: 2
+  ats: greenhouse
+  slug: bridgewater89
+- name: Deloitte
+  priority: 4
+  ats: avature
+  site: en_US/careers/SearchJobs
+  host: apply.deloitte.com
+- name: Accenture
+  priority: 4
+  ats: workday
+  tenant: accenture
+  wd: wd103
+  site: AccentureCareers
+  # Global board (~2000 jobs, no locationsText) + fuzzy searchText: SEARCH_TERMS
+  # pulled 6,234 rows in 524 s, all eligible hits foreign. CA/US country facet +
+  # "internship" only (2026-11-10: 8 hits, 1 request).
+  workday_facets: false
+  workday_search_terms: [internship]
+  workday_applied_facets:
+    locationCountry: [bc33aa3152ec42d4995f4791a106ed09, a30a87ed25634629aa6c3958aa2b91ea]  # United States of America, Canada
+- name: KPMG
+  priority: 4
+  ats: icims
+  host: careers.kpmg.ca
+- name: PwC
+  priority: 4
+  ats: phenom
+  slug: PWCACA
+  site: ca/en
+  host: jobs-ca.pwc.com
+- name: Celestica
+  priority: 3
+  ats: successfactors
+  host: careers.celestica.com
+- name: Hydro One
+  priority: 3
+  ats: successfactors
+  host: jobs.hydroone.com
+- name: Canada Life
+  priority: 4
+  ats: successfactors
+  host: jobs.canadalife.com
+- name: Seagate
+  priority: 4
+  ats: successfactors_sitemap  # RMK Unify site: urlset sitemap + capped detail pages
+  host: seagatecareers.com
+- name: ASML
+  priority: 3
+  ats: workday
+  tenant: asml
+  wd: wd3
+  site: ASMLEXT1
+- name: Epic Systems
+  priority: 2
+  ats: epic
+- name: Balyasny
+  priority: 2
+  ats: balyasny
+  site: BAM Website
+  host: bambusdev.my.site.com
+- name: Renaissance Technologies
+  priority: 2
+  ats: rentec
+- name: Bombardier
+  priority: 3
+  ats: successfactors_sitemap
+  host: jobs.bombardier.com
+- name: Ontario Power Generation
+  priority: 3
+  ats: successfactors_sitemap
+  host: jobs.opg.com
+# Cost accepted knowingly (2026-11-10): the only robots-allowed source is a ~9 MB
+# RSS sitemap (~1.5 MB gzipped on the wire, ~72 MB/day at 30-min scans), one GET
+# per scan, no detail calls. Deloitte Canada posts tech co-ops; no lighter feed exists.
+- name: Deloitte Canada
+  priority: 4
+  ats: successfactors_sitemap
+  host: careers.deloitte.ca
+- name: CGI
+  priority: 3
+  ats: njoyn
+  slug: CORP
+  tenant: APP,CCFT,CCPT,INT,TBD,TRD,TRN,VIE,WS,DSPB,DSPM,TSBM,CDAP,CDPR,
+  site: '21001'
+  host: cgi.njoyn.com
+- name: Moment Factory
+  priority: 4
+  ats: digitalrecruiters
+  slug: jobs.momentfactory.com
+  site: en

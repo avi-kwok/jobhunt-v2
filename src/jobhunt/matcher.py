@@ -10,11 +10,13 @@ from .models import Criteria, Job
 NO_LOCATION_TIER = 5
 REMOTE_KEYWORDS = ("remote",)
 # Opaque location rollups we can't pin to a city — Workday collapses a posting
-# open in several places into "3 Locations" / "Multiple Locations". We must not
-# silently drop these on the location gate (one of those places may be a good
-# city); keep them.
+# open in several places into "3 Locations" / "Multiple Locations"; SpaceX says
+# "Flexible - Any SpaceX Site". We must not silently drop these on the location
+# gate (one of those places may be a good city); keep them.
 _UNRESOLVED_LOCATION_RE = re.compile(
-    r"^\s*(multiple locations|\d+\s+locations?)\s*$", re.IGNORECASE
+    r"^\s*(multiple locations|\d+\s+locations?|flexible"
+    r"|(?:flexible\s*[-–:]?\s*)?any\b[^,;]*\bsites?)\s*$",
+    re.IGNORECASE,
 )
 
 
