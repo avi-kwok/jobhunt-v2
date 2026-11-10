@@ -50,8 +50,21 @@ def test_db_counts_24h_window(tmp_path):
     db = str(tmp_path / "jobhunt_v2.db")
     _seed_db(db)
     assert cli._heartbeat_db_counts(db) == {
-        "active_subscribers": 1, "postings_24h": 3, "sent_24h": 1, "failed_24h": 1,
+        "active_subscribers": 1, "pending_subscribers": 1, "disabled_subscribers": 0,
+        "signups_24h": 2, "activations_24h": 1,
+        "postings_24h": 3, "sent_24h": 1, "failed_24h": 1,
     }
+
+
+def test_no_notify_table_has_growth_fields(monkeypatch, tmp_path):
+    db = str(tmp_path / "jobhunt_v2.db")
+    _seed_db(db)
+    monkeypatch.setattr(cli, "CRON_LOG_PATH", tmp_path / "none.log")
+    monkeypatch.setattr(cli, "LAST_RUN_PATH", tmp_path / "none.json")
+    monkeypatch.setattr(cli, "load_config", lambda: _fake_cfg())
+    out = runner.invoke(cli.app, ["heartbeat", "--no-notify", "--db", db], env={"COLUMNS": "200"}).output
+    assert "Signups / activations (24h)" in out and "2 / 1" in out
+    assert "Pending / disabled" in out and "1 / 0" in out
 
 
 # ---- (a) health verdict: fresh vs stale cron.log --------------------------

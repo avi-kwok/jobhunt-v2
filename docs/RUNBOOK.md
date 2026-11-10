@@ -168,6 +168,11 @@ with a private manage link appears in that channel. Open it and press **Activate
 - **Scan exits 3 on every run with one subscriber**: a wrong key and a lone corrupt row look the
   same, and delivery stays blocked. Run `.venv/bin/jobhunt doctor`; if the key is fine, run
   `.venv/bin/jobhunt subscriber remove ID` for the bad row (see `subscriber list`).
+- **Admin dashboard** (read-only: counts, 14-day trend, masked subscriber table; never webhook URLs
+  or tokens). From your Mac:
+  `ssh -L 8765:127.0.0.1:8765 ubuntu@VM 'cd jobhunt-v2 && .venv/bin/jobhunt dashboard'`, then open
+  `http://127.0.0.1:8765/`. It is bound to localhost on the VM, needs no open port, and adds nothing to
+  the public site. Ctrl+C (or closing the SSH session) stops it.
 - **Remove a subscriber**: `.venv/bin/jobhunt subscriber remove ID`.
 - **Restore from backup** (`~/backups/jobhunt-<UTC stamp>.dump`, 7 newest kept). Use the session
   pooler URL, from a client whose major version is >= the server's:

@@ -193,8 +193,11 @@ def test_stats_24h(conn):
     db.mark_sent(conn, sid, [j1.uid])
     db.reserve_delivery(conn, sid, j2.uid)
     db.mark_failed(conn, sid, [j2.uid])
-    assert db.stats_24h(conn) == {"active_subscribers": 1, "postings_24h": 2,
-                                  "sent_24h": 1, "failed_24h": 1}
+    assert db.stats_24h(conn) == {
+        "active_subscribers": 1, "pending_subscribers": 1, "disabled_subscribers": 0,
+        "signups_24h": 2, "activations_24h": 1,
+        "postings_24h": 2, "sent_24h": 1, "failed_24h": 1,
+    }
 
 
 def test_prune_keeps_postings_still_on_board(conn):

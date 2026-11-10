@@ -767,6 +767,40 @@ def _heartbeat_db_counts(db_path: str | None) -> dict:
 
 
 @app.command()
+def dashboard(
+    port: int = typer.Option(8765, "--port", help="Local port (bound to 127.0.0.1 only)."),
+    db_path: str = typer.Option(None, "--db", help=DB_HELP),
+) -> None:
+    """Read-only admin page on 127.0.0.1; reach it through an SSH tunnel. Ctrl+C to stop."""
+    from .dashboard import make_server, render_page
+
+    def page() -> str:
+        now = datetime.now(timezone.utc)
+        last_run = _read_last_run()
+        scan_ts = None
+        try:
+            scan_ts = datetime.fromisoformat(last_run["ts"]) if last_run else None
+        except (KeyError, ValueError):
+            pass
+        conn = v2db.connect(db_path)
+        try:
+            return render_page(
+                conn, _relative_time(_mtime(CRON_LOG_PATH), now), _relative_time(scan_ts, now)
+            )
+        finally:
+            conn.close()
+
+    server = make_server(port, page)
+    console.print(f"Admin dashboard on http://127.0.0.1:{server.server_address[1]}/ (Ctrl+C to stop)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+@app.command()
 def heartbeat(
     no_notify: bool = typer.Option(
         False, "--no-notify", help="Print the summary to the console instead of posting."
@@ -808,6 +842,8 @@ def heartbeat(
         ("Last completed scan", _relative_time(last_scan_ts, now)),
         ("Watchlist", str(watchlist)),
         ("Active subscribers", str(counts["active_subscribers"])),
+        ("Signups / activations (24h)", f"{counts['signups_24h']} / {counts['activations_24h']}"),
+        ("Pending / disabled", f"{counts['pending_subscribers']} / {counts['disabled_subscribers']}"),
         ("Postings (24h)", str(counts["postings_24h"])),
         ("Deliveries sent (24h)", str(counts["sent_24h"])),
         ("Deliveries failed (24h)", str(counts["failed_24h"])),

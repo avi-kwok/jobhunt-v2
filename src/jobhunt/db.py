@@ -668,20 +668,72 @@ def prune_pending_subscribers(
 
 
 def stats_24h(conn: Conn) -> dict[str, int]:
-    """Heartbeat numbers: active subscribers, postings and deliveries in the last 24h."""
+    """Heartbeat numbers: subscriber growth plus postings and deliveries in the last 24h."""
     since = to_iso(datetime.now(timezone.utc) - timedelta(days=1))
     q = conn.execute
+
+    def one(sql: str, *args) -> int:
+        return q(sql, args).fetchone()[0]
+
+    by_status = subscriber_status_counts(conn)
     return {
-        "active_subscribers": q(
-            "SELECT COUNT(*) FROM subscribers WHERE status='active'"
-        ).fetchone()[0],
-        "postings_24h": q(
-            "SELECT COUNT(*) FROM postings WHERE first_seen_at >= ?", (since,)
-        ).fetchone()[0],
-        "sent_24h": q(
-            "SELECT COUNT(*) FROM deliveries WHERE status='sent' AND sent_at >= ?", (since,)
-        ).fetchone()[0],
-        "failed_24h": q(
-            "SELECT COUNT(*) FROM deliveries WHERE status='failed' AND updated_at >= ?", (since,)
-        ).fetchone()[0],
+        "active_subscribers": by_status["active"],
+        "pending_subscribers": by_status["pending"],
+        "disabled_subscribers": by_status["disabled"],
+        "signups_24h": one("SELECT COUNT(*) FROM subscribers WHERE created_at >= ?", since),
+        "activations_24h": one("SELECT COUNT(*) FROM subscribers WHERE activated_at >= ?", since),
+        "postings_24h": one("SELECT COUNT(*) FROM postings WHERE first_seen_at >= ?", since),
+        "sent_24h": one(
+            "SELECT COUNT(*) FROM deliveries WHERE status='sent' AND sent_at >= ?", since),
+        "failed_24h": one(
+            "SELECT COUNT(*) FROM deliveries WHERE status='failed' AND updated_at >= ?", since),
+    }
+
+
+SUBSCRIBER_STATUSES = ("active", "pending", "paused", "disabled")
+
+
+def subscriber_status_counts(conn: Conn) -> dict[str, int]:
+    """Subscriber count per status (every status present, zero if none)."""
+    out = dict.fromkeys(SUBSCRIBER_STATUSES, 0)
+    for status, n in conn.execute("SELECT status, COUNT(*) FROM subscribers GROUP BY status"):
+        out[status] = n
+    return out
+
+
+def daily_activity(conn: Conn, days: int = 14, now: datetime | None = None) -> list[dict]:
+    """Per UTC day, oldest first, for the last `days` days (today included; zeros filled).
+
+    Timestamps are fixed-width ISO strings, so substr(col,1,10) is the UTC day on both backends.
+    """
+    now = now or datetime.now(timezone.utc)
+    day_list = [(now - timedelta(days=i)).date().isoformat() for i in range(days - 1, -1, -1)]
+    since = day_list[0]
+    rows = {d: {"day": d, "signups": 0, "activations": 0, "sent": 0, "failed": 0, "postings": 0}
+            for d in day_list}
+    queries = (
+        ("signups", "SELECT substr(created_at,1,10), COUNT(*) FROM subscribers "
+                    "WHERE created_at >= ? GROUP BY 1"),
+        ("activations", "SELECT substr(activated_at,1,10), COUNT(*) FROM subscribers "
+                        "WHERE activated_at >= ? GROUP BY 1"),
+        ("sent", "SELECT substr(sent_at,1,10), COUNT(*) FROM deliveries "
+                 "WHERE status='sent' AND sent_at >= ? GROUP BY 1"),
+        ("failed", "SELECT substr(updated_at,1,10), COUNT(*) FROM deliveries "
+                   "WHERE status='failed' AND updated_at >= ? GROUP BY 1"),
+        ("postings", "SELECT substr(first_seen_at,1,10), COUNT(*) FROM postings "
+                     "WHERE first_seen_at >= ? GROUP BY 1"),
+    )
+    for key, sql in queries:
+        for day, n in conn.execute(sql, (since,)).fetchall():
+            if day in rows:
+                rows[day][key] = n
+    return [rows[d] for d in day_list]
+
+
+def totals(conn: Conn) -> dict[str, int]:
+    """All-time totals for the admin dashboard."""
+    q = conn.execute
+    return {
+        "postings": q("SELECT COUNT(*) FROM postings").fetchone()[0],
+        "sent": q("SELECT COUNT(*) FROM deliveries WHERE status='sent'").fetchone()[0],
     }
