@@ -101,10 +101,7 @@ companies:
   priority: 1
   ats: greenhouse
   slug: jumptrading
-- name: LinkedIn
-  priority: 1
-  ats: greenhouse
-  slug: linkedin
+# LinkedIn removed 2026-11-09: greenhouse board 404; lever 'linkedin' is a test board; no supported public board
 - name: Magnet Forensics
   ats: lever
   slug: magnetforensics
@@ -285,8 +282,10 @@ companies:
   slug: pinterest
 - name: Postman
   priority: 2
-  ats: greenhouse
-  slug: postman
+  ats: workday
+  tenant: postman
+  wd: wd108
+  site: careers
 - name: Ramp
   priority: 2
   ats: ashby
@@ -387,8 +386,8 @@ companies:
   priority: 3
 - name: Marqeta
   priority: 3
-  ats: greenhouse
-  slug: marqeta
+  ats: ashby
+  slug: marqeta-inc
 - name: Mercury
   priority: 3
   ats: greenhouse
@@ -427,8 +426,8 @@ companies:
   slug: applied
 - name: Aurora Innovation
   priority: 4
-  ats: greenhouse
-  slug: aurorainnovation
+  ats: ashby
+  slug: aurora-operations-inc
 - name: Benevity
   priority: 4
   ats: ashby
