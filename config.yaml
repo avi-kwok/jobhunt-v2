@@ -149,6 +149,18 @@ criteria:
   # disable and use the seen-store alone.
   freshness_minutes: 360
 
+  # LLM TIE-BREAK (llm_tiebreak.py). A title whose ONLY role match is an ambiguous
+  # term above, and that passes every other gate (intern/co-op, excludes, years,
+  # location, freshness), gets one Claude Haiku call; its yes/no replaces the rules'
+  # verdict (tagged "llm" in posting_tags). Once per posting, shared by all
+  # subscribers. Inert without ANTHROPIC_API_KEY in .env. When a cap is hit, or on
+  # any API error/refusal, the rules decide. Spend: logs/llm_usage.json.
+  llm_tiebreak:
+    enabled: true
+    model: claude-haiku-5-5
+    max_calls_per_scan: 50
+    daily_usd_cap: 0.25
+
 # ---------------------------------------------------------------------------
 # SPEND + RATE SAFEGUARDS. These hard-cap paid API usage so the key can never be
 # used uncontrolled. Every LLM call is gated by these limits and its real token

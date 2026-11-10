@@ -76,7 +76,21 @@ def _scan_sections(last_run: dict | None) -> list[str]:
     return out
 
 
-def render_page(conn, last_cron: str, last_scan: str, last_run: dict | None = None) -> str:
+def _llm_section(llm: dict | None) -> list[str]:
+    """'LLM tie-break (today)': state, calls, tokens, spend vs the daily cap."""
+    if not llm:
+        return []
+    return [
+        "<h2>LLM tie-break (today, UTC)</h2>",
+        _table(["State", "Calls", "Input tokens", "Output tokens", "Spend (USD)", "Daily cap"],
+               [[llm["status"], llm["calls"], llm["input_tokens"], llm["output_tokens"],
+                 f"{llm['usd']:.4f}", f"{llm['cap']:.2f}"]]),
+    ]
+
+
+def render_page(
+    conn, last_cron: str, last_scan: str, last_run: dict | None = None, llm: dict | None = None
+) -> str:
     counts = v2db.subscriber_status_counts(conn)
     tot = v2db.totals(conn)
     days = v2db.daily_activity(conn, 14)
@@ -86,6 +100,7 @@ def render_page(conn, last_cron: str, last_scan: str, last_run: dict | None = No
         f"<style>{_CSS}</style><h1>jobhunt admin</h1>",
         f"<p>Last cron fire: {escape(last_cron)}<br>Last completed scan: {escape(last_scan)}</p>",
         *_scan_sections(last_run),
+        *_llm_section(llm),
         "<h2>Totals</h2>",
         _table(["Postings stored", "Active subscribers", "Deliveries sent (all time)"],
                [[tot["postings"], counts["active"], tot["sent"]]]),

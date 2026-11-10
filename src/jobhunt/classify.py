@@ -1,9 +1,13 @@
-"""Deterministic posting classifier (v2). No LLM, no network.
+"""Deterministic posting classifier (v2). No network unless a tie-breaker is passed.
 
 `classify(job, criteria, location_tiers)` turns a Job into a `Classification`
 that mirrors the `posting_tags` table. Everything is title/location/description
 regex work with WHOLE-WORD matching, so "Internal", "International" and
 "Cooperative" never count as intern / co-op.
+
+Optional `tiebreak` (llm_tiebreak.TieBreaker): consulted ONLY when the sole role match
+is an ambiguous term and every other gate passes; its verdict replaces the rules'
+verdict and is marked with an "llm" category (plus an "llm: " reject_reason prefix).
 
 Bump RULES_VERSION whenever the rules change so stored tags can be re-run.
 """
@@ -13,7 +17,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import Callable
 
+from .llm_tiebreak import LLM_TAG, REJECT_PREFIX, Verdict
 from .matcher import _is_remote, _is_unresolved_location
 from .models import Criteria, Job
 
@@ -368,9 +374,12 @@ def _ambiguous_is_swe(title: str, company: str | None, rules: _Rules) -> bool:
 
 
 def classify(
-    job: Job, criteria: Criteria, location_tiers: dict[str, list[str]]
+    job: Job,
+    criteria: Criteria,
+    location_tiers: dict[str, list[str]],
+    tiebreak: Callable[[Job], Verdict | None] | None = None,
 ) -> Classification:
-    """Deterministic eligibility + tags for one posting."""
+    """Deterministic eligibility + tags for one posting (see module doc for `tiebreak`)."""
     rules = _rules(criteria, location_tiers)
     title = job.title or ""
 
@@ -382,11 +391,9 @@ def classify(
         level = "internship"
 
     role_title = _ROLE_VETO_RE.sub(" ", title)
-    swe = bool(rules.role and rules.role.search(role_title)) or bool(
-        rules.amb_role
-        and rules.amb_role.search(role_title)
-        and _ambiguous_is_swe(role_title, job.company, rules)
-    )
+    strong = bool(rules.role and rules.role.search(role_title))
+    ambiguous_only = not strong and bool(rules.amb_role and rules.amb_role.search(role_title))
+    swe = strong or (ambiguous_only and _ambiguous_is_swe(role_title, job.company, rules))
     categories = ["swe"] if swe else []
 
     # exclusions run on the title with exempt phrases blanked out
@@ -413,6 +420,20 @@ def classify(
         reason = f"requires {years}+ years of experience"
     elif not loc_ok:
         reason = "outside CA/US"
+
+    # Ambiguous-only title that passes every other gate: the LLM verdict (if any) decides.
+    if (
+        tiebreak is not None
+        and ambiguous_only
+        and level is not None
+        and not excl_match
+        and years is None
+        and loc_ok
+    ):
+        verdict = tiebreak(job)
+        if verdict is not None:
+            categories = ["swe", LLM_TAG] if verdict.is_swe else [LLM_TAG]
+            reason = None if verdict.is_swe else f"{REJECT_PREFIX}{verdict.reason}"
 
     return Classification(
         eligible=reason is None,

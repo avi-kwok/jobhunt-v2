@@ -230,3 +230,37 @@ its circuit breaker: its remaining companies are skipped this scan and tried fir
 - Scans keep hitting the deadline (`deadline_hit` in the dashboard): raise `max_workers` (hosts differ) or lower
   the delays only if the Hosts table shows zero 429s. Keep `scan_deadline_seconds` below `timeout 1800`
   (and below `schedule.max_run_seconds` minus 2 min if that watchdog is on; the scan clamps itself).
+
+## 10. LLM tie-break for ambiguous titles (optional)
+
+A title whose only role match is an ambiguous discipline term (systems / integration / automation / build /
+production / platform / infrastructure engineer, front end, mobile app) and that passes every other gate
+(intern/co-op term, excludes, years, location, freshness) gets one Claude Haiku 5.5 call. Its yes/no
+replaces the rules' verdict for that posting. Each posting is classified once, for all subscribers.
+Every other title never reaches the LLM. Without `ANTHROPIC_API_KEY` the feature does nothing and the
+rules decide.
+
+- **Enable** (worker only; Vercel needs nothing). On the VM, in bash, so the key stays out of history,
+  `ps` and the terminal:
+
+```
+cd ~/jobhunt-v2
+read -rsp 'Anthropic API key: ' K; echo
+sed -i '/^ANTHROPIC_API_KEY=/d' .env && printf 'ANTHROPIC_API_KEY=%s\n' "$K" >> .env; unset K
+chmod 600 .env
+.venv/bin/jobhunt doctor    # row "LLM tie-break" -> enabled (key set)
+```
+
+- **Caps** (`criteria.llm_tiebreak` in `config.yaml`): `max_calls_per_scan: 50`, `daily_usd_cap: 0.25`
+  (UTC day). Spend = `response.usage` tokens x $0.10 / $0.50 per 1M (input / output), kept in
+  `logs/llm_usage.json`. When a cap is reached, or on any API error, timeout (20 s, 1 retry), refusal or
+  malformed answer, the rules decide that posting and the scan goes on.
+- **Watch**: heartbeat field "LLM tie-break (today)" (calls and spend vs cap); dashboard section
+  "LLM tie-break (today, UTC)"; a `LLM tie-break: ...` line in `worker.log` on scans that used it.
+- **What it changed**: `posting_tags.categories` contains `"llm"` when the LLM decided, and a rejected
+  posting has `reject_reason` starting with `llm: ` (then the model's short reason). `rules_version` is
+  unchanged. Example: `SELECT uid, eligible, reject_reason FROM posting_tags WHERE categories LIKE '%"llm"%';`
+  The `llm` marker is not shown in Discord alerts.
+- **Disable**: remove the key (`sed -i '/^ANTHROPIC_API_KEY=/d' .env`). This takes effect on the next scan.
+  You can also set `criteria.llm_tiebreak.enabled: false` in `config.yaml` (commit it, then re-run
+  `worker-setup.sh`).

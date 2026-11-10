@@ -56,6 +56,18 @@ class CompanyConfig(BaseModel):
     eightfold_mode: str | None = None
 
 
+class LLMTiebreakConfig(BaseModel):
+    """`criteria.llm_tiebreak`: one Claude call decides AMBIGUOUS-only role titles.
+
+    Inert without ANTHROPIC_API_KEY. When a cap is reached the rules verdict is used.
+    """
+
+    enabled: bool = True
+    model: str = "claude-haiku-5-5"
+    max_calls_per_scan: int = 50
+    daily_usd_cap: float = 0.25
+
+
 class Criteria(BaseModel):
     """Title/location filtering rules from config.yaml."""
 
@@ -75,6 +87,8 @@ class Criteria(BaseModel):
     # Sources without a reliable timestamp (Workday; Greenhouse gives edit-time)
     # are always included — the dedupe guarantees "new since last scan".
     freshness_minutes: float | None = None
+    # LLM tie-breaker for ambiguous-only role titles (see llm_tiebreak.py).
+    llm_tiebreak: LLMTiebreakConfig = LLMTiebreakConfig()
 
 
 class AppConfig(BaseModel):

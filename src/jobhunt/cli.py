@@ -16,10 +16,11 @@ from rich.table import Table
 
 from . import adapters  # noqa: F401 - registers adapters
 from . import db as v2db
-from . import crypto, pipeline, scheduler, security, webhooks
+from . import crypto, llm_tiebreak, pipeline, scheduler, security, webhooks
 from .budget import BudgetExceeded, BudgetGuard  # tailor + `budget` command only
 from .config import load_config
 from .matcher import location_tier
+from .models import LLMTiebreakConfig
 from .notifier import LOCATION_LABELS, PRIORITY_LABELS, DiscordNotifier
 from .watchdog import start_watchdog
 
@@ -225,7 +226,10 @@ def scan(
     ),
     db_path: str = typer.Option(None, "--db", help=DB_HELP),
 ) -> None:
-    """v2 pipeline: ingest -> classify -> match subscribers -> deliver. No LLM."""
+    """v2 pipeline: ingest -> classify -> match subscribers -> deliver.
+
+    The only LLM use: ambiguous-only titles may get one Claude call each (criteria.llm_tiebreak,
+    inert without an API key, hard caps per scan and per day; see llm_tiebreak.py)."""
     scan_t0 = time.monotonic()
     cfg = load_config()
 
@@ -290,8 +294,12 @@ def scan(
         new_jobs = pipeline.ingest(
             cfg, conn, errors, resolved, report=report, deadline_seconds=deadline or None
         )
-        classified = pipeline.classify_new(cfg, conn, new_jobs)
-        pipeline.classify_untagged(cfg, conn)  # postings pushed via POST /ingest/posting
+        tiebreak = _make_tiebreak(cfg)
+        classified = pipeline.classify_new(cfg, conn, new_jobs, tiebreak)
+        # postings pushed via POST /ingest/posting
+        pipeline.classify_untagged(cfg, conn, tiebreak=tiebreak)
+        if tiebreak is not None and (tiebreak.calls or tiebreak.capped):
+            console.print(f"[dim]{escape(tiebreak.summary())}[/]")
         eligible = [j for j, c in classified if c.eligible]
         console.print(
             f"New fresh postings: {len(new_jobs)} · eligible: {len(eligible)}"
@@ -378,6 +386,31 @@ def scan(
         console.print(f"\n[yellow]{len(errors)} company error(s):[/]")
         for e in errors:
             console.print(f"  [red]•[/] {escape(security.redact(e))}", markup=True)
+
+
+def _make_tiebreak(cfg) -> llm_tiebreak.TieBreaker | None:
+    """The scan's LLM tie-breaker, or None (disabled / no key / client setup failed)."""
+    try:
+        return llm_tiebreak.from_config(cfg.criteria.llm_tiebreak)
+    except Exception as exc:  # noqa: BLE001 - never block a scan on the optional LLM
+        console.print(f"[yellow]LLM tie-break off:[/] {escape(security.redact(type(exc).__name__))}")
+        return None
+
+
+def _llm_cfg(cfg) -> LLMTiebreakConfig:
+    return getattr(getattr(cfg, "criteria", None), "llm_tiebreak", None) or LLMTiebreakConfig()
+
+
+def _llm_today(cfg) -> dict:
+    """Today's LLM tie-break usage + state, for the heartbeat and the dashboard."""
+    lt = _llm_cfg(cfg)
+    u = llm_tiebreak.read_usage()
+    return {**u, "cap": lt.daily_usd_cap, "status": llm_tiebreak.status(lt)}
+
+
+def _llm_line(info: dict) -> str:
+    line = f"{info['calls']} calls · ${info['usd']:.4f} of ${info['cap']:.2f}"
+    return line if info["status"].startswith("enabled") else f"{info['status']} · {line}"
 
 
 # ---- list-matches ---------------------------------------------------------
@@ -503,8 +536,11 @@ def run_doctor() -> list[tuple[str, bool, str]]:
             checks.append(("schema version", False, "skipped: database unreachable"))
 
     min_ep = 50
+    lt = LLMTiebreakConfig()
     try:
-        n = sum(1 for c in load_config().companies if c.ats)
+        loaded = load_config()
+        lt = loaded.criteria.llm_tiebreak
+        n = sum(1 for c in loaded.companies if c.ats)
         checks.append(
             (
                 "company endpoints",
@@ -515,6 +551,9 @@ def run_doctor() -> list[tuple[str, bool, str]]:
         )
     except Exception as exc:  # noqa: BLE001
         checks.append(("company endpoints", False, f"config not loadable: {type(exc).__name__}"))
+
+    # Informational (always PASS): the tie-breaker is optional and inert without a key.
+    checks.append(("LLM tie-break", True, llm_tiebreak.status(lt)))
 
     try:
         probe = "doctor-probe"
@@ -803,9 +842,13 @@ def dashboard(
             pass
         conn = v2db.connect(db_path)
         try:
+            try:
+                llm = _llm_today(load_config())
+            except Exception:  # noqa: BLE001 - config unreadable: still render the page
+                llm = None
             return render_page(
                 conn, _relative_time(_mtime(CRON_LOG_PATH), now), _relative_time(scan_ts, now),
-                last_run,
+                last_run, llm,
             )
         finally:
             conn.close()
@@ -878,6 +921,7 @@ def heartbeat(
         ("Deliveries sent (24h)", str(counts["sent_24h"])),
         ("Deliveries failed (24h)", str(counts["failed_24h"])),
         ("Rate limits (last scan)", rate_text),
+        ("LLM tie-break (today)", _llm_line(_llm_today(cfg))),
     ]
 
     if healthy and tripped:

@@ -1,7 +1,9 @@
 """v2 pipeline stages as plain functions: ingest -> classify_new -> match_subscribers -> deliver.
 
-No LLM anywhere. Every stage takes an open db.Conn (SQLite or Postgres, see db.connect)
-so tests can drive them with temp databases and fake adapters.
+The only LLM use is the optional ambiguous-title tie-breaker passed to the classify stage
+(llm_tiebreak.py), once per posting, never per subscriber. Every stage takes an open
+db.Conn (SQLite or Postgres, see db.connect) so tests can drive them with temp databases
+and fake adapters.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from . import crypto, db, scheduler, webhooks
 from .adapters import base
 from .adapters.base import get_adapter
 from .classify import RULES_VERSION, Classification, classify
+from .llm_tiebreak import TieBreaker
 from .match import matches, sort_key
 from .matcher import dedupe_by_uid, is_fresh, location_tier
 from .models import AppConfig, Job, PolitenessConfig
@@ -148,9 +151,9 @@ def ingest(
 
 
 def classify_new(
-    cfg: AppConfig, conn: db.Conn, jobs: list[Job]
+    cfg: AppConfig, conn: db.Conn, jobs: list[Job], tiebreak: TieBreaker | None = None
 ) -> list[tuple[Job, Classification]]:
-    out = [(job, classify(job, cfg.criteria, cfg.location_tiers)) for job in jobs]
+    out = [(job, classify(job, cfg.criteria, cfg.location_tiers, tiebreak)) for job in jobs]
     db.upsert_tags_many(conn, [(job.uid, cls) for job, cls in out])
     return out
 
@@ -159,7 +162,8 @@ UNTAGGED_PER_SCAN = 500
 
 
 def classify_untagged(
-    cfg: AppConfig, conn: db.Conn, *, limit: int = UNTAGGED_PER_SCAN, now: datetime | None = None
+    cfg: AppConfig, conn: db.Conn, *, limit: int = UNTAGGED_PER_SCAN, now: datetime | None = None,
+    tiebreak: TieBreaker | None = None,
 ) -> int:
     """Tag postings that have no tags yet (pushed via POST /ingest/posting). Same freshness
     gate as ingest: stale -> STALE_REASON, fresh -> classify. Returns how many were tagged."""
@@ -167,7 +171,7 @@ def classify_untagged(
     items: list[tuple[str, Classification]] = []
     for job in db.untagged_postings(conn, limit):
         if is_fresh(job, cfg.criteria.freshness_minutes, now=now):
-            items.append((job.uid, classify(job, cfg.criteria, cfg.location_tiers)))
+            items.append((job.uid, classify(job, cfg.criteria, cfg.location_tiers, tiebreak)))
         else:
             items.append((job.uid, Classification(
                 eligible=False, reject_reason=STALE_REASON, rules_version=RULES_VERSION)))

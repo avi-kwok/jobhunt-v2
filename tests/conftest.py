@@ -15,10 +15,17 @@ def secret_key():
 
 
 @pytest.fixture(autouse=True)
-def _env(monkeypatch, secret_key):
+def _env(monkeypatch, secret_key, tmp_path):
     monkeypatch.setenv("JOBHUNT_SECRET_KEY", secret_key)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("ADMIN_WEBHOOK_URL", raising=False)
+    # Never reach the real Claude API: no key (the LLM tie-break stays off unless a test
+    # injects a fake client), a dead base URL as a backstop, spend file in tmp.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9")
+    from jobhunt import llm_tiebreak
+
+    monkeypatch.setattr(llm_tiebreak, "USAGE_PATH", tmp_path / "llm_usage.json")
 
 
 @pytest.fixture(

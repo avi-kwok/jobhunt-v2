@@ -90,7 +90,8 @@ def alert_embed(
 ) -> dict:
     """v2 alert embed: no score / LLM reason, just the deterministic tags."""
     prio_label, color = PRIORITY_LABELS.get(company_priority, PRIORITY_LABELS[4])
-    why = " · ".join([x for x in [level, *categories] if x]) or "-"
+    # "llm" is an internal marker (llm_tiebreak.LLM_TAG), not shown to subscribers.
+    why = " · ".join([x for x in [level, *categories] if x and x != "llm"]) or "-"
     company = _clip(_md_escape(job.company), COMPANY_MAX)
     room = max(TITLE_MAX - len(company) - len(TITLE_SEP), MIN_POSITION)
     embed = {
