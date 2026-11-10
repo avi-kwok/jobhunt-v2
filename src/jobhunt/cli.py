@@ -276,6 +276,7 @@ def scan(
     try:
         new_jobs = pipeline.ingest(cfg, conn, errors, resolved)
         classified = pipeline.classify_new(cfg, conn, new_jobs)
+        pipeline.classify_untagged(cfg, conn)  # postings pushed via POST /ingest/posting
         eligible = [j for j, c in classified if c.eligible]
         console.print(
             f"New fresh postings: {len(new_jobs)} · eligible: {len(eligible)}"

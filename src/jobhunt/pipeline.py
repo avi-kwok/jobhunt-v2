@@ -119,6 +119,26 @@ def classify_new(
     return out
 
 
+UNTAGGED_PER_SCAN = 500
+
+
+def classify_untagged(
+    cfg: AppConfig, conn: db.Conn, *, limit: int = UNTAGGED_PER_SCAN, now: datetime | None = None
+) -> int:
+    """Tag postings that have no tags yet (pushed via POST /ingest/posting). Same freshness
+    gate as ingest: stale -> STALE_REASON, fresh -> classify. Returns how many were tagged."""
+    now = now or datetime.now(timezone.utc)
+    items: list[tuple[str, Classification]] = []
+    for job in db.untagged_postings(conn, limit):
+        if is_fresh(job, cfg.criteria.freshness_minutes, now=now):
+            items.append((job.uid, classify(job, cfg.criteria, cfg.location_tiers)))
+        else:
+            items.append((job.uid, Classification(
+                eligible=False, reject_reason=STALE_REASON, rules_version=RULES_VERSION)))
+    db.upsert_tags_many(conn, items)
+    return len(items)
+
+
 # ---- stage 3: match -------------------------------------------------------
 
 

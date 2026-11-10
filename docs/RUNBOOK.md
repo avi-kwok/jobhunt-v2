@@ -186,3 +186,16 @@ unset PW
 
   A restore needs the same `JOBHUNT_SECRET_KEY` that was in use when the dump was taken, or the
   restored webhooks are unreadable. Copy a dump off the VM occasionally (`scp`); the VM holds the only copies.
+
+## 8. External ingest (`POST /ingest/posting`)
+
+Off by default. Web (Vercel) env only; the worker needs nothing.
+
+- **Enable**: generate a secret with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`.
+  In Vercel set `INGEST_SECRET` (type Secret) and `INGEST_ENABLED=true`, redeploy. Give the secret to
+  the pushing pipeline as `Authorization: Bearer <secret>`.
+- **Kill switch / disable**: set `INGEST_ENABLED=false` (or delete it) and redeploy; the route returns 503.
+  Already-stored postings still go through the next scans normally.
+- **Rotate**: set a new `INGEST_SECRET`, redeploy, give it to the pipeline. The old one stops working at once.
+- Ingested postings are stored untagged (`source = muse-pipeline`); the next worker scan classifies
+  them (up to 500 per scan) and delivers matches. Nothing delivers until the worker runs.

@@ -6,6 +6,7 @@ people who can read the channel) is the only credential. See docs/architecture.m
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import logging
 import os
@@ -14,16 +15,20 @@ from pathlib import Path
 import httpx
 import jinja2
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from .. import crypto, db, webhooks
+from .. import crypto, db, ingest, webhooks
+from ..models import Job
 
 HERE = Path(__file__).parent
 COUNTRIES = ("CA", "US")
 LEVELS = ("internship", "coop")
 SUBSCRIBE_PER_IP_PER_HOUR = 10
 MESSAGES_PER_WEBHOOK_PER_DAY = 3
+INGEST_PER_HOUR = 60  # rate_limit_hit is a fixed one-hour window
+INGEST_MIN_SECRET = 32
 DISCORD_TIMEOUT = 5.0
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
@@ -295,3 +300,57 @@ def manage_post(
         return _manage_page(request, db.get_subscriber(conn, sub.id), t, notice, error, status)
     finally:
         conn.close()
+
+
+# ---- ingest (external pipeline pushes postings; the worker classifies them) -------------
+
+
+def _ingest_store(post: ingest.Posting) -> tuple[int, dict]:
+    conn = _open()
+    try:
+        if not db.rate_limit_hit(conn, crypto.keyed_hash("ingest"), INGEST_PER_HOUR):
+            return 429, {"error": "rate limit"}
+        if db.posting_known(conn, post.uid, post.url_variants):
+            return 200, {"status": "duplicate"}
+        job = Job(source=ingest.SOURCE, company=post.company, external_id=post.uid.rsplit(":", 1)[1],
+                  title=post.title, location=post.location, url=post.url, posted_at=post.posted_at,
+                  posted_note=post.posted_note)
+        if not db.insert_posting(conn, job):
+            return 200, {"status": "duplicate"}
+        return 201, {"status": "accepted", "posting_id": post.uid}
+    finally:
+        conn.close()
+
+
+async def _read_capped(request: Request) -> bytes | None:
+    """The body, or None if it exceeds ingest.MAX_BODY (counts real bytes, not the header)."""
+    try:
+        if int(request.headers.get("content-length") or 0) > ingest.MAX_BODY:
+            return None
+    except ValueError:
+        return None
+    buf = bytearray()
+    async for chunk in request.stream():
+        buf += chunk
+        if len(buf) > ingest.MAX_BODY:
+            return None
+    return bytes(buf)
+
+
+@app.post("/ingest/posting", include_in_schema=False)
+async def ingest_posting(request: Request):
+    secret = os.environ.get("INGEST_SECRET", "")
+    if os.environ.get("INGEST_ENABLED") != "true" or len(secret) < INGEST_MIN_SECRET:
+        return JSONResponse({"error": "disabled"}, status_code=503)
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(token.encode(), secret.encode()):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    raw = await _read_capped(request)
+    if raw is None:
+        return JSONResponse({"error": "body too large"}, status_code=413)
+    try:
+        post = ingest.parse(raw)
+    except ingest.IngestError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    status, body = await run_in_threadpool(_ingest_store, post)
+    return JSONResponse(body, status_code=status)

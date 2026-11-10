@@ -100,6 +100,21 @@ string, so it can appear in hosting request logs; treat those logs as sensitive.
 Web env vars: `DATABASE_URL` (Supabase transaction pooler), `JOBHUNT_SECRET_KEY`,
 `PUBLIC_BASE_URL`.
 
+## External ingest (`POST /ingest/posting`)
+
+An external pipeline can push postings. Off unless `INGEST_ENABLED=true` and `INGEST_SECRET` (>= 32
+chars) are set (else 503); auth is a constant-time bearer compare (401). Body <= 4 KB, JSON, field
+caps, https-only URL without userinfo (`ingest.py`); 60 requests/hour through `db.rate_limit_hit`.
+The web request only inserts the posting untagged with `source = muse-pipeline` and uid
+`muse-pipeline:<company>:<sha256(normalized url incl. query)[:32]>`; the client's `country`/`level` are validated
+but never used for delivery. The worker's `pipeline.classify_untagged` (each scan, after ingest) tags
+postings without a `posting_tags` row with the same freshness gate and rules as scanner postings, so
+matching then delivers them normally. Dedup: same uid, or a stored posting whose `url` equals the
+original or a normalized variant (http/https, trailing slash). Limitation: a job under a genuinely
+different URL form (other host, reordered or extra query params) is not caught. The query string is
+kept in the identity. A bare-date `posted_at` is stored as a note only (undated, so fresh); a full
+datetime is stored and gated by freshness. `deadline` is accepted but not stored.
+
 ## Worker (`deploy/v2/`)
 
 `worker-setup.sh` is idempotent and targets a new Oracle Always Free A1.Flex VM (Ubuntu 22.04 or
@@ -133,6 +148,7 @@ a postgres URL; default is `DATABASE_URL` if set, else `jobhunt_v2.db`.
 | `JOBHUNT_SECRET_KEY` | encrypt/decrypt/hash webhooks (web, non-dry-run scan, `subscriber add`, `doctor`); identical on Vercel and the worker |
 | `DATABASE_URL` | Postgres connection; unset = SQLite. Web: transaction pooler (6543). Worker: session pooler (5432) |
 | `PUBLIC_BASE_URL` | web only: origin used in the manage links |
+| `INGEST_SECRET`, `INGEST_ENABLED` | web only: bearer secret (>= 32 chars) and on-switch (`true`) for `POST /ingest/posting`; off by default |
 | `ADMIN_WEBHOOK_URL` | heartbeat destination (admin channel), `doctor` |
 | `JOBHUNT_CONTACT` | optional contact in the scraper User-Agent |
 | `JOBHUNT_TEST_DATABASE_URL` | tests only; enables the Postgres test runs |

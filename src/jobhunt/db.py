@@ -276,6 +276,37 @@ def insert_new_postings(
     return new
 
 
+def posting_known(conn: Conn, uid: str, urls: list[str]) -> bool:
+    """True if a posting has this uid or any of these exact urls (no index on url: small table)."""
+    marks = ",".join("?" * len(urls))
+    return conn.execute(
+        f"SELECT 1 FROM postings WHERE uid = ? OR url IN ({marks}) LIMIT 1", (uid, *urls)
+    ).fetchone() is not None
+
+
+def insert_posting(conn: Conn, job: Job, seen_at: str | None = None) -> bool:
+    """Insert one posting; False if its uid already exists (lost a race)."""
+    seen_at = seen_at or utcnow_iso()
+    cur = conn.execute(
+        "INSERT INTO postings (uid, source, company, title, url, location_raw, posted_at, "
+        "posted_note, first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT (uid) DO NOTHING",
+        (job.uid, job.source, job.company, job.title, job.url, job.location,
+         to_iso(job.posted_at) if job.posted_at else None, job.posted_note, seen_at, seen_at),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def untagged_postings(conn: Conn, limit: int) -> list[Job]:
+    """Oldest postings with no posting_tags row (e.g. pushed by POST /ingest/posting)."""
+    rows = conn.execute(
+        "SELECT p.* FROM postings p LEFT JOIN posting_tags t ON t.uid = p.uid "
+        "WHERE t.uid IS NULL ORDER BY p.first_seen_at LIMIT ?", (limit,)
+    ).fetchall()
+    return [job_from_row(r) for r in rows]
+
+
 def touch_postings(conn: Conn, uids: list[str], now: datetime | None = None) -> None:
     """Mark postings still on the board (at most one write per posting per day)."""
     now = now or datetime.now(timezone.utc)
