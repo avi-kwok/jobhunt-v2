@@ -309,3 +309,49 @@ def test_ingest_dedupes_within_fetch(cfg, conn):
     FakeAdapter.JOBS = [_job(1), _job(1)]
     new = pipeline.ingest(cfg, conn, [], cfg.companies, now=T0)
     assert len(new) == 1
+
+
+class _Spy:
+    """Counts execute/executemany/commit calls made through a Conn."""
+
+    def __init__(self, conn):
+        self.n = {"execute": 0, "executemany": 0, "commit": 0}
+        for name in self.n:
+            orig = getattr(conn, name)
+
+            def wrap(*a, _o=orig, _k=name, **kw):
+                self.n[_k] += 1
+                return _o(*a, **kw)
+
+            setattr(conn, name, wrap)
+
+    @property
+    def total(self):
+        return sum(self.n.values())
+
+
+def test_ingest_bulk_bounded_round_trips_and_same_results(cfg, conn):
+    old = T0 - timedelta(days=30)
+    FakeAdapter.JOBS = [_job(i, posted_at=old if i % 2 else T0) for i in range(1200)]
+    spy = _Spy(conn)
+    new = pipeline.ingest(cfg, conn, [], cfg.companies, now=T0)
+    # fresh ones returned in order; stale (600) tagged ineligible
+    assert [j.external_id for j in new] == [str(i) for i in range(0, 1200, 2)]
+    assert conn.execute("SELECT COUNT(*) FROM postings").fetchone()[0] == 1200
+    assert conn.execute(
+        "SELECT COUNT(*) FROM posting_tags WHERE eligible=0 AND reject_reason=?",
+        (pipeline.STALE_REASON,)).fetchone()[0] == 600
+    # 1200 jobs: touch 3 + select 3 + insert 1 + tags 1 + commits -> bounded, far below 1200
+    assert spy.total <= 20, spy.n
+    assert spy.n["commit"] <= 4, spy.n
+
+    spy.n.update(execute=0, executemany=0, commit=0)
+    classified = pipeline.classify_new(cfg, conn, new)
+    assert len(classified) == 600
+    assert spy.n["executemany"] == 1 and spy.n["commit"] == 1, spy.n
+    assert conn.execute("SELECT COUNT(*) FROM posting_tags").fetchone()[0] == 1200
+
+    # rerun: nothing new, no inserts
+    spy.n.update(execute=0, executemany=0, commit=0)
+    assert pipeline.ingest(cfg, conn, [], cfg.companies, now=T0) == []
+    assert spy.n["executemany"] == 0 and spy.total <= 10, spy.n

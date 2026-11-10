@@ -238,21 +238,40 @@ def truncate_all(conn: Conn) -> None:
 def insert_new_postings(
     conn: Conn, jobs: list[Job], seen_at: str | None = None
 ) -> list[Job]:
-    """Insert postings not yet stored; return only those that were new."""
+    """Insert postings not yet stored; return only those that were new (input order).
+
+    O(chunks) round trips: SELECT the already-stored uids (500 per query), then one
+    executemany for the rest, one commit. ON CONFLICT DO NOTHING keeps a racing writer
+    safe; at worst both report the same row as new (scans are flock-serialized anyway).
+    """
     seen_at = seen_at or utcnow_iso()
+    uids = [j.uid for j in jobs]
+    existing: set[str] = set()
+    for i in range(0, len(uids), 500):
+        chunk = uids[i : i + 500]
+        marks = ",".join("?" * len(chunk))
+        existing.update(
+            r[0] for r in conn.execute(f"SELECT uid FROM postings WHERE uid IN ({marks})", chunk)
+        )
     new: list[Job] = []
+    seen_new: set[str] = set()
     for job in jobs:
-        cur = conn.execute(
+        if job.uid not in existing and job.uid not in seen_new:
+            seen_new.add(job.uid)
+            new.append(job)
+    if new:
+        conn.executemany(
             "INSERT INTO postings (uid, source, company, title, url, "
             "location_raw, posted_at, posted_note, first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT (uid) DO NOTHING",
-            (
-                job.uid, job.source, job.company, job.title, job.url, job.location,
-                to_iso(job.posted_at) if job.posted_at else None, job.posted_note, seen_at, seen_at,
-            ),
+            [
+                (
+                    j.uid, j.source, j.company, j.title, j.url, j.location,
+                    to_iso(j.posted_at) if j.posted_at else None, j.posted_note, seen_at, seen_at,
+                )
+                for j in new
+            ],
         )
-        if cur.rowcount:
-            new.append(job)
     conn.commit()
     return new
 
@@ -272,10 +291,14 @@ def touch_postings(conn: Conn, uids: list[str], now: datetime | None = None) -> 
     conn.commit()
 
 
-def upsert_tags(
-    conn: Conn, uid: str, cls: Classification, classified_at: str | None = None
+def upsert_tags_many(
+    conn: Conn, items: list[tuple[str, Classification]], classified_at: str | None = None
 ) -> None:
-    conn.execute(
+    """Upsert many (uid, Classification) rows: one executemany, one commit."""
+    if not items:
+        return
+    stamp = classified_at or utcnow_iso()
+    conn.executemany(
         "INSERT INTO posting_tags (uid, eligible, reject_reason, categories, level, countries, "
         "cities, remote, location_opaque, classified_at, rules_version) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
@@ -284,13 +307,22 @@ def upsert_tags(
         "level=excluded.level, countries=excluded.countries, cities=excluded.cities, "
         "remote=excluded.remote, location_opaque=excluded.location_opaque, "
         "classified_at=excluded.classified_at, rules_version=excluded.rules_version",
-        (
-            uid, int(cls.eligible), cls.reject_reason, json.dumps(cls.categories), cls.level,
-            json.dumps(cls.countries), json.dumps(cls.cities), int(cls.remote),
-            int(cls.location_opaque), classified_at or utcnow_iso(), cls.rules_version,
-        ),
+        [
+            (
+                uid, int(c.eligible), c.reject_reason, json.dumps(c.categories), c.level,
+                json.dumps(c.countries), json.dumps(c.cities), int(c.remote),
+                int(c.location_opaque), stamp, c.rules_version,
+            )
+            for uid, c in items
+        ],
     )
     conn.commit()
+
+
+def upsert_tags(
+    conn: Conn, uid: str, cls: Classification, classified_at: str | None = None
+) -> None:
+    upsert_tags_many(conn, [(uid, cls)], classified_at)
 
 
 def tags_from_row(row) -> Classification:

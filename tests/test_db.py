@@ -224,3 +224,23 @@ def test_prune_pending_subscribers(conn):
     conn.commit()
     assert db.prune_pending_subscribers(conn, now=NOW) == 1
     assert sorted(r[0] for r in conn.execute("SELECT id FROM subscribers").fetchall()) == [new_p, old_a]
+
+
+def test_insert_new_postings_bulk_order_dupes_and_chunks(conn):
+    jobs = [_job(i) for i in range(1100)]
+    db.insert_new_postings(conn, jobs[::3])
+    new = db.insert_new_postings(conn, jobs + [jobs[1]])  # in-batch duplicate too
+    assert [j.uid for j in new] == [j.uid for j in jobs if j not in jobs[::3]]
+    assert conn.execute("SELECT COUNT(*) FROM postings").fetchone()[0] == 1100
+
+
+def test_upsert_tags_many_one_commit_and_updates(conn):
+    js = [_job(i) for i in range(3)]
+    db.insert_new_postings(conn, js)
+    db.upsert_tags_many(conn, [(j.uid, Classification(eligible=False, reject_reason="x")) for j in js])
+    db.upsert_tags_many(conn, [(js[0].uid, Classification(eligible=True, level="coop"))])
+    db.upsert_tags_many(conn, [])
+    rows = {r["uid"]: r for r in conn.execute("SELECT * FROM posting_tags")}
+    assert len(rows) == 3
+    assert rows[js[0].uid]["eligible"] == 1 and rows[js[0].uid]["level"] == "coop"
+    assert rows[js[1].uid]["reject_reason"] == "x"

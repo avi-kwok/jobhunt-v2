@@ -94,15 +94,17 @@ def ingest(
         if not jobs:
             continue
         db.touch_postings(conn, [j.uid for j in jobs], now=now)
+        stale: list[tuple[str, Classification]] = []
         for job in db.insert_new_postings(conn, jobs, seen_at=db.to_iso(now)):
             if is_fresh(job, cfg.criteria.freshness_minutes, now=now):
                 fresh_new.append(job)
             else:
-                db.upsert_tags(
-                    conn, job.uid,
+                stale.append((
+                    job.uid,
                     Classification(eligible=False, reject_reason=STALE_REASON,
                                    rules_version=RULES_VERSION),
-                )
+                ))
+        db.upsert_tags_many(conn, stale)
     return fresh_new
 
 
@@ -112,11 +114,8 @@ def ingest(
 def classify_new(
     cfg: AppConfig, conn: db.Conn, jobs: list[Job]
 ) -> list[tuple[Job, Classification]]:
-    out = []
-    for job in jobs:
-        cls = classify(job, cfg.criteria, cfg.location_tiers)
-        db.upsert_tags(conn, job.uid, cls)
-        out.append((job, cls))
+    out = [(job, classify(job, cfg.criteria, cfg.location_tiers)) for job in jobs]
+    db.upsert_tags_many(conn, [(job.uid, cls) for job, cls in out])
     return out
 
 
