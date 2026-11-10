@@ -29,6 +29,9 @@ PAGE_SIZE = 25
 MAX_PAGES = 10  # per search (=250 rows)
 _HEADERS = {"Accept": "text/html,application/xhtml+xml"}
 _ID_RE = re.compile(r"/(\d+)/?$")
+# Structural markers: the results label (pages with >=1 hit) or the RMK keyword search box
+# (also on zero-hit pages, which carry no paginationLabel).
+_MARKERS = ("paginationLabel", "keywordsearch-q")
 _TOTAL_RE = re.compile(r"of\s*<b>\s*([\d,]+)\s*</b>", re.IGNORECASE)
 
 
@@ -117,7 +120,7 @@ class SuccessFactorsAdapter(Adapter):
                 )
                 resp.raise_for_status()
                 rows = parse_results(resp.text)
-                if not rows and "paginationLabel" not in resp.text:
+                if not rows and not any(m in resp.text for m in _MARKERS):
                     raise ValueError(f"{company.name}: successfactors page has no results container")
                 for r in rows:
                     m = _ID_RE.search(r["href"])

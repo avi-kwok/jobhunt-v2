@@ -78,3 +78,21 @@ def test_challenge_page_raises():
     respx.get(URL).mock(return_value=httpx.Response(200, text="<html><body>Access denied</body></html>"))
     with pytest.raises(ValueError, match="results container"):
         run()
+
+
+@respx.mock
+def test_zero_hit_page_without_pagination_label_ok():
+    # real RMK zero-result page: search form present, no paginationLabel
+    def handler(request):
+        q = request.url.params["q"]
+        return httpx.Response(200, text=fx("page1.html" if q == "intern" else "zero_results.html"))
+
+    respx.get(URL).mock(side_effect=handler)
+    assert len(run()) > 0  # co-op/student zero pages do not raise; intern rows kept
+
+
+@respx.mock
+def test_no_marker_still_raises():
+    respx.get(URL).mock(return_value=httpx.Response(200, text="<html><body>Access denied</body></html>"))
+    with pytest.raises(ValueError, match="no results container"):
+        run()
