@@ -11,24 +11,13 @@ import httpx
 from .models import Job
 from .security import redact
 
-# tier -> (label, embed color)
-PRIORITY_LABELS = {
-    1: ("Top priority", 0x2ECC71),
-    2: ("Strong", 0x3498DB),
-    3: ("Tracking", 0xF1C40F),
-    4: ("Default", 0x95A5A6),
-}
-LOCATION_LABELS = {
-    1: "Local (Van/Tor)",
-    2: "US metro",
-    3: "Rest of Canada",
-    4: "Remote",
-    5: "Other",
-}
+# Embed color by posting country: red = Canada, blue = USA.
+COLOR_CA, COLOR_US = 0xE74C3C, 0x3498DB
+COLOR_BOTH, COLOR_UNKNOWN = 0x9B59B6, 0x95A5A6  # CA+US multi-location / remote or opaque
 MAX_EMBEDS_PER_MESSAGE = 10
 # Discord caps a message at 6000 embed chars; 10 embeds -> keep each under ~600.
-# Budget: title 180 ("<company> — <position>") + priority ~20 + location 100 + posted 60
-# + type 100 + names ~30 (~490 worst case).
+# Budget: title 180 ("<company> — <position>") + location 100 + posted 60
+# + type 100 + names ~20 (~460 worst case).
 TITLE_MAX, COMPANY_MAX, LOCATION_MAX, POSTED_MAX, TYPE_MAX = 180, 60, 100, 60, 100
 TITLE_SEP = " — "
 MIN_POSITION = 40  # the position is never clipped below this (COMPANY_MAX keeps it true)
@@ -85,27 +74,30 @@ def _posted_display(job: Job) -> str:
     return "unknown"
 
 
+def country_color(countries: list[str]) -> int:
+    """Red for Canada, blue for USA, purple for both, grey when neither is known."""
+    found = {c.upper() for c in countries}
+    ca, us = "CA" in found, "US" in found
+    if ca and us:
+        return COLOR_BOTH
+    return COLOR_CA if ca else COLOR_US if us else COLOR_UNKNOWN
+
+
 def alert_embed(
-    job: Job, company_priority: int, location_tier: int, level: str | None, categories: list[str]
+    job: Job, countries: list[str], level: str | None, categories: list[str]
 ) -> dict:
     """v2 alert embed: no score / LLM reason, just the deterministic tags."""
-    prio_label, color = PRIORITY_LABELS.get(company_priority, PRIORITY_LABELS[4])
     # "llm" is an internal marker (llm_tiebreak.LLM_TAG), not shown to subscribers.
     why = " · ".join([x for x in [level, *categories] if x and x != "llm"]) or "-"
     company = _clip(_md_escape(job.company), COMPANY_MAX)
     room = max(TITLE_MAX - len(company) - len(TITLE_SEP), MIN_POSITION)
     embed = {
         "title": f"{company}{TITLE_SEP}{_clip(job.title, room)}",
-        "color": color,
+        "color": country_color(countries),
         "fields": [
-            {"name": "Priority", "value": prio_label, "inline": True},
             {
                 "name": "Location",
-                "value": _clip(
-                    f"{_md_escape(job.location or 'unspecified')} · "
-                    f"{LOCATION_LABELS.get(location_tier, 'Other')}",
-                    LOCATION_MAX,
-                ),
+                "value": _clip(_md_escape(job.location or "unspecified"), LOCATION_MAX),
                 "inline": True,
             },
             {"name": "Posted", "value": _clip(_posted_display(job), POSTED_MAX), "inline": True},

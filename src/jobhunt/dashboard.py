@@ -112,10 +112,10 @@ def render_page(
                 for d in reversed(days)]),
         "<h2>Subscribers</h2>",
         _table(
-            ["Webhook", "Status", "Countries", "Levels", "Created", "Activated", "Last ok",
+            ["Webhook", "Status", "Countries", "Levels", "Grad", "Created", "Activated", "Last ok",
              "Fails", "Disabled reason"],
             [[_masked(s.webhook_enc), s.status, ",".join(s.countries), ",".join(s.levels),
-              (s.created_at or "-")[:19], (s.activated_at or "-")[:19],
+              s.grad_date or "-", (s.created_at or "-")[:19], (s.activated_at or "-")[:19],
               (s.last_ok_at or "-")[:19], s.fail_count, s.disabled_reason or "-"] for s in subs],
         ),
     ]

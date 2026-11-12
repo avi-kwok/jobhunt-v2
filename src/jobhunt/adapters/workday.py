@@ -41,10 +41,15 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from ..models import CompanyConfig, Job
-from .base import Adapter, register, request_with_retry
+from .base import Adapter, make_client, register, request_with_retry
 
 JOBS_URL = "https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs"
 JOB_BASE = "https://{tenant}.{wd}.myworkdayjobs.com/{site}"
+# A public job URL (JOB_BASE + externalPath) -> its JSON detail endpoint.
+_JOB_URL_RE = re.compile(
+    r"^https://(?P<tenant>[A-Za-z0-9-]+)\.(?P<wd>wd\d+)\.myworkdayjobs\.com"
+    r"/(?P<site>[^/?#]+)(?P<path>/job/[^?#]+)$"
+)
 
 PAGE_LIMIT = 20
 MAX_PAGES = 50  # per-search safety valve (=1000 postings) so a search can't loop forever
@@ -89,6 +94,8 @@ _LOCATION_FACET_RE = re.compile(
 SEARCH_CONCURRENCY = 2  # run this many per-board searches at once; low by design so we stay a polite, low-burst client and never trip a host's rate limit
 
 _RATE_LIMIT_COOLDOWN = 5.0
+_NON_JSON_RETRIES = 1  # extra attempts when a 200 response body is not JSON
+_NON_JSON_RETRY_DELAY = 2.0
 _HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 
 # One search = (searchText, appliedFacets).
@@ -177,11 +184,27 @@ class WorkdayAdapter(Adapter):
         terms = company.workday_search_terms or SEARCH_TERMS
         return [(term, dict(base)) for term in terms]
 
+    def _post_json(self, url: str, body: dict) -> dict:
+        """POST and parse JSON, retrying once when Workday answers 200 with a non-JSON body.
+
+        Workday boards occasionally return an empty or HTML body (a brief throttle or
+        maintenance page) that parses as "Expecting value: line 1 column 1". That is
+        transient, so one short retry recovers it instead of losing the company for a scan.
+        """
+        for attempt in range(1 + _NON_JSON_RETRIES):
+            resp = request_with_retry(self.client, "POST", url, json=body, headers=_HEADERS)
+            resp.raise_for_status()
+            try:
+                return resp.json()
+            except ValueError:  # json.JSONDecodeError
+                if attempt == _NON_JSON_RETRIES:
+                    raise
+                time.sleep(_NON_JSON_RETRY_DELAY)
+        raise AssertionError("unreachable")
+
     def _discover_facets(self, url: str, applied: dict[str, list[str]] | None = None) -> list[dict]:
         body = {"appliedFacets": applied or {}, "limit": PAGE_LIMIT, "offset": 0, "searchText": ""}
-        resp = request_with_retry(self.client, "POST", url, json=body, headers=_HEADERS)
-        resp.raise_for_status()
-        return resp.json().get("facets") or []
+        return self._post_json(url, body).get("facets") or []
 
     def _fetch_board(
         self, url: str, job_base: str, company: CompanyConfig, workers: int
@@ -248,11 +271,7 @@ class WorkdayAdapter(Adapter):
                 "offset": offset,
                 "searchText": term,
             }
-            resp = request_with_retry(
-                self.client, "POST", url, json=body, headers=_HEADERS
-            )
-            resp.raise_for_status()
-            payload = resp.json()
+            payload = self._post_json(url, body)
 
             postings = payload.get("jobPostings", [])
             if not postings:
@@ -286,3 +305,40 @@ class WorkdayAdapter(Adapter):
             posted_at=None,  # the list endpoint only gives a relative string…
             posted_note=p.get("postedOn"),  # …so keep it for display ("Posted Today")
         )
+
+
+def detail_url(job_url: str | None) -> str | None:
+    """The cxs JSON detail endpoint for a Workday job URL, or None if it isn't one."""
+    m = _JOB_URL_RE.match((job_url or "").strip())
+    if not m:
+        return None
+    return (
+        f"https://{m['tenant']}.{m['wd']}.myworkdayjobs.com"
+        f"/wday/cxs/{m['tenant']}/{m['site']}{m['path']}"
+    )
+
+
+def resolve_locations(job_url: str | None, client: httpx.Client | None = None) -> str | None:
+    """Every location of a Workday posting ("Israel, Yokneam; US, CA, Santa Clara").
+
+    The list endpoint collapses multi-location postings to "2 Locations"; the detail
+    endpoint has the primary `location` plus `additionalLocations`. Returns None on any
+    failure (not a Workday URL, HTTP error, odd payload) so the caller keeps the original.
+    """
+    url = detail_url(job_url)
+    if url is None:
+        return None
+    own = client is None
+    client = client or make_client()
+    try:
+        resp = request_with_retry(client, "GET", url, headers=_HEADERS)
+        resp.raise_for_status()
+        info = resp.json().get("jobPostingInfo") or {}
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+    finally:
+        if own:
+            client.close()
+    locs = [info.get("location"), *(info.get("additionalLocations") or [])]
+    locs = [str(x).strip() for x in locs if isinstance(x, str) and x.strip()]
+    return "; ".join(dict.fromkeys(locs)) or None

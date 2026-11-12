@@ -72,7 +72,7 @@ def test_old_schema_version_fails(monkeypatch, tmp_path):
     c.close()
     _env(monkeypatch, path)
     r = runner.invoke(cli.app, ["doctor"])
-    assert r.exit_code == 1 and "need 2" in r.output
+    assert r.exit_code == 1 and "need 4" in r.output
 
 
 def test_bad_secret_key_fails(monkeypatch, tmp_path):

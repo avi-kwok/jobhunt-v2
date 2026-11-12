@@ -15,6 +15,7 @@ Bump RULES_VERSION whenever the rules change so stored tags can be re-run.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Callable
@@ -23,7 +24,8 @@ from .llm_tiebreak import LLM_TAG, REJECT_PREFIX, Verdict
 from .matcher import _is_remote, _is_unresolved_location
 from .models import Criteria, Job
 
-RULES_VERSION = 2
+RULES_VERSION = 3
+REJECT_MAX = 160
 
 # ---- term lists -----------------------------------------------------------
 
@@ -288,6 +290,53 @@ _US_STATE_SEG_RE = re.compile(
 _NOT_CITIES = {"canada", "ontario", "british columbia", "quebec", "remote"}
 
 
+# City gazetteer (GeoNames cities1000, CC BY 4.0; built by scripts/build_cities.py).
+# Loaded on first use, never at import.
+_CITIES_PATH = Path(__file__).parent / "data" / "cities_us_ca.tsv"
+_CITY_SEG_RE = re.compile(
+    r"^\s*(?P<city>[^,]+?)\s*,\s*(?P<st>[A-Z]{2})"
+    r"(?:\s+(?:\d{5}(?:-\d{4})?|[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d))?"
+    r"(?:\s*,\s*(?i:usa|us|united\s+states(?:\s+of\s+america)?|canada))?\s*$"
+)
+
+
+def _norm_city(name: str) -> str:
+    s = re.sub(r"[.'’`]", "", name.lower())
+    s = re.sub(r"[\s\-]+", " ", s).strip()
+    return re.sub(r"^st ", "saint ", s)
+
+
+@lru_cache(maxsize=1)
+def _city_index() -> dict[str, frozenset[tuple[str, str]]]:
+    idx: dict[str, set[tuple[str, str]]] = {}
+    try:
+        text = _CITIES_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3:
+            idx.setdefault(parts[0], set()).add((parts[1], parts[2]))
+    return {k: frozenset(v) for k, v in idx.items()}
+
+
+def _city_country(city: str, st: str) -> str | None:
+    """'US' / 'CA' for a "City, ST" segment per the gazetteer, else None (unknown/ambiguous)."""
+    entries = _city_index().get(_norm_city(city))
+    if not entries:
+        return None
+    if st == "CA":  # California or Canada
+        in_ca_state = ("US", "CA") in entries
+        in_canada = any(c == "CA" for c, _ in entries)
+        if in_ca_state and not in_canada:
+            return "US"
+        if in_canada and not in_ca_state:
+            return "CA"
+        return None
+    us, ca = ("US", st) in entries, ("CA", st) in entries
+    return "US" if us and not ca else "CA" if ca and not us else None
+
+
 @dataclass
 class _Loc:
     countries: list[str]
@@ -333,6 +382,18 @@ def _detect_location(location: str, rules: _Rules) -> _Loc:
         ca = True
     if codes & _US_CODES:
         us = True
+    # Gazetteer: "City, ST" segments (country-less or "City, CA"). Only adds a country.
+    for seg in re.split(r"[;|]", location):
+        if (_FOREIGN_RE and _FOREIGN_RE.search(seg.lower())) or _UK_TOKEN_RE.search(seg):
+            continue
+        m = _CITY_SEG_RE.match(seg)
+        if not m:
+            continue
+        found = _city_country(m.group("city"), m.group("st"))
+        if found == "US":
+            us = True
+        elif found == "CA":
+            ca = True
     # "CA" is both Canada's and California's code: only a tie-breaker when nothing
     # else identified the country ("Remote - CA" -> Canada; "San Jose, CA" -> US via city).
     if "CA" in codes and not (ca or us):
@@ -343,6 +404,46 @@ def _detect_location(location: str, rules: _Rules) -> _Loc:
         us = True
     countries = [c for c, on in (("CA", ca), ("US", us)) if on]
     return _Loc(countries, cities, foreign)
+
+
+# ---- term tags ("Summer 2027") ----------------------------------------------
+
+_SEASON = r"(?:winter|spring|summer|fall|autumn)"
+_SEASONS_RE = rf"{_SEASON}(?:\s*(?:/|&|,|-|\band\b|\bor\b)\s*{_SEASON})*"
+_TERM_A_RE = re.compile(rf"\b({_SEASONS_RE})\s*,?\s*(?:term\s+)?(20\d\d)\b", re.IGNORECASE)
+_TERM_B_RE = re.compile(rf"\b(20\d\d)\s+({_SEASONS_RE})\b", re.IGNORECASE)
+_SEASON_FIND_RE = re.compile(_SEASON, re.IGNORECASE)
+
+
+def parse_terms(text: str | None) -> list[str]:
+    """Canonical "Season YYYY" tags found in `text`, in order, deduped ("Autumn" -> Fall;
+    "Winter/Spring 2027" -> Winter 2027 + Spring 2027)."""
+    if not text:
+        return []
+    found: list[tuple[int, str, str]] = []
+    for m in _TERM_A_RE.finditer(text):
+        found.append((m.start(), m.group(1), m.group(2)))
+    for m in _TERM_B_RE.finditer(text):
+        found.append((m.start(), m.group(2), m.group(1)))
+    out: list[str] = []
+    for _, seasons, year in sorted(found):
+        for sea in _SEASON_FIND_RE.findall(seasons):
+            sea = sea.lower()
+            tag = f"{'Fall' if sea == 'autumn' else sea.capitalize()} {year}"
+            if tag not in out:
+                out.append(tag)
+    return out
+
+
+def merge_terms(*groups) -> list[str]:
+    """Merge term lists (free-form strings are normalized through parse_terms), deduped."""
+    out: list[str] = []
+    for g in groups:
+        for t in g or ():
+            for tag in parse_terms(str(t)):
+                if tag not in out:
+                    out.append(tag)
+    return out
 
 
 # ---- result ---------------------------------------------------------------
@@ -361,6 +462,7 @@ class Classification:
     remote: bool = False
     location_opaque: bool = False
     rules_version: int = RULES_VERSION
+    terms: list[str] = field(default_factory=list)  # ["Summer 2027", ...]
 
 
 def _ambiguous_is_swe(title: str, company: str | None, rules: _Rules) -> bool:
@@ -381,7 +483,8 @@ def classify(
 ) -> Classification:
     """Deterministic eligibility + tags for one posting (see module doc for `tiebreak`)."""
     rules = _rules(criteria, location_tiers)
-    title = job.title or ""
+    # Curly apostrophes ("Master’s") must match the straight ones used in config terms.
+    title = (job.title or "").replace("’", "'").replace("‘", "'")
 
     # level: co-op wins, else internship terms
     level: str | None = None
@@ -421,10 +524,13 @@ def classify(
     elif not loc_ok:
         reason = "outside CA/US"
 
-    # Ambiguous-only title that passes every other gate: the LLM verdict (if any) decides.
+    # LLM review: any title with a role match (strong or ambiguous) that passes every other
+    # gate gets one call. Ambiguous-only: the verdict replaces the rules' SWE decision.
+    # Otherwise it can only reject (non-software role, or not open to undergrads).
+    llm_terms: list[str] = []
     if (
         tiebreak is not None
-        and ambiguous_only
+        and (strong or ambiguous_only)
         and level is not None
         and not excl_match
         and years is None
@@ -432,8 +538,14 @@ def classify(
     ):
         verdict = tiebreak(job)
         if verdict is not None:
-            categories = ["swe", LLM_TAG] if verdict.is_swe else [LLM_TAG]
-            reason = None if verdict.is_swe else f"{REJECT_PREFIX}{verdict.reason}"
+            llm_terms = list(verdict.terms)
+            if verdict.is_swe and verdict.undergrad_ok:
+                if ambiguous_only:
+                    categories, reason = ["swe", LLM_TAG], None
+            else:
+                why = verdict.reason if not verdict.is_swe else f"not open to undergrads: {verdict.reason}"
+                reason = f"{REJECT_PREFIX}{why}"[:REJECT_MAX]
+                categories = (["swe"] if verdict.is_swe else []) + [LLM_TAG]
 
     return Classification(
         eligible=reason is None,
@@ -444,4 +556,5 @@ def classify(
         cities=loc.cities,
         remote=remote,
         location_opaque=opaque,
+        terms=merge_terms(parse_terms(title), job.terms, llm_terms),
     )

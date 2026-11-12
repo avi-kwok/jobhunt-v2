@@ -314,3 +314,47 @@ def test_failed_post_existing_keeps_token_and_slot(client, conn):
     assert r.status_code == 200
     assert client.get("/manage", params={"t": old}).status_code == 200
     assert conn.execute("SELECT verify_count FROM subscribers").fetchone()[0] == 1
+
+
+def test_signup_without_grad_date_is_null(client, discord, conn):
+    assert subscribe(client).status_code == 200
+    assert row(conn).grad_date is None
+
+
+def test_signup_with_grad_date(client, discord, conn):
+    r = client.post("/subscribe", headers={"x-forwarded-for": "1.1.1.1"},
+                    data={"webhook_url": hook_url(1), "countries": ["CA"], "levels": ["coop"],
+                          "grad_month": "4", "grad_year": str(web._grad_years()[2])})
+    assert r.status_code == 200
+    assert row(conn).grad_date == f"{web._grad_years()[2]}-04"
+
+
+@pytest.mark.parametrize("month,year", [("13", "{y}"), ("0", "{y}"), ("4", "1999"), ("4", "{far}"),
+                                        ("4", ""), ("", "{y}"), ("x", "{y}"), ("4", "20 28")])
+def test_signup_invalid_grad_rejected(client, discord, conn, month, year):
+    y = web._grad_years()[0]
+    year = year.format(y=y, far=y + 7)
+    r = client.post("/subscribe", headers={"x-forwarded-for": "1.1.1.1"},
+                    data={"webhook_url": hook_url(1), "countries": ["CA"], "levels": ["coop"],
+                          "grad_month": month, "grad_year": year})
+    assert r.status_code == 400 and web._BAD in r.text
+    assert row(conn) is None and not posts(discord)
+
+
+def test_manage_set_and_clear_grad_date(client, discord, conn):
+    subscribe(client)
+    t = token_from(discord)
+    y = web._grad_years()[1]
+    r = manage(client, t, "update", countries=["CA"], levels=["coop"], grad_month="9", grad_year=str(y))
+    assert "Preferences saved" in r.text and row(conn).grad_date == f"{y}-09"
+    page = client.get(f"/manage?t={t}").text
+    assert re.search(r'<option value="9" selected>', page) and f'<option value="{y}" selected>' in page
+    bad = manage(client, t, "update", countries=["CA"], levels=["coop"], grad_month="2", grad_year="1990")
+    assert bad.status_code == 400 and row(conn).grad_date == f"{y}-09"  # unchanged
+    r = manage(client, t, "update", countries=["CA"], levels=["coop"], grad_month="", grad_year="")
+    assert "Preferences saved" in r.text and row(conn).grad_date is None
+
+
+def test_signup_page_has_grad_selects(client):
+    page = client.get("/").text
+    assert 'name="grad_month"' in page and 'name="grad_year"' in page and "No filter" in page

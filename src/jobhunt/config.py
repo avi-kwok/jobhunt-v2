@@ -48,7 +48,8 @@ def _merge_resolved(
         if target is None:
             continue
         for field in ("ats", "slug", "tenant", "wd", "site", "host", "workday_facets",
-                      "workday_search_terms", "workday_applied_facets", "eightfold_mode"):
+                      "workday_search_terms", "workday_applied_facets", "eightfold_mode",
+                      "covered_by"):
             if entry.get(field) is not None:
                 setattr(target, field, entry[field])
 
@@ -77,6 +78,24 @@ def _append_resolved_only(
         existing.add(name)
 
 
+SIMPLIFY_NAME = "SimplifyJobs"
+
+
+def simplify_allowlist(companies: list[CompanyConfig]) -> list[str]:
+    """In-scope companies the Simplify fallback may emit: no ATS of their own, not covered
+    by a parent board. A company with an `ats` is never listed (no-overlap guarantee)."""
+    return sorted(
+        c.name for c in companies
+        if c.name != SIMPLIFY_NAME and not c.ats and not c.covered_by
+    )
+
+
+def _attach_simplify_allowlist(companies: list[CompanyConfig]) -> None:
+    for c in companies:
+        if c.name == SIMPLIFY_NAME and c.ats == "simplify":
+            c.simplify_companies = simplify_allowlist(companies)
+
+
 def load_config(
     config_path: Path | str = CONFIG_PATH,
     resolved_path: Path | str = RESOLVED_PATH,
@@ -102,6 +121,7 @@ def load_config(
 
     _merge_resolved(companies, resolved_path)
     _append_resolved_only(companies, resolved_path, priority_map)
+    _attach_simplify_allowlist(companies)
 
     budget = BudgetConfig(**raw.get("budget", {}))
     politeness = PolitenessConfig(**raw.get("politeness", {}))

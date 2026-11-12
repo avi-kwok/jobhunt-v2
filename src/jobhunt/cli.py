@@ -19,9 +19,8 @@ from . import db as v2db
 from . import crypto, llm_tiebreak, pipeline, scheduler, security, webhooks
 from .budget import BudgetExceeded, BudgetGuard  # tailor + `budget` command only
 from .config import load_config
-from .matcher import location_tier
 from .models import LLMTiebreakConfig
-from .notifier import LOCATION_LABELS, PRIORITY_LABELS, DiscordNotifier
+from .notifier import DiscordNotifier
 from .watchdog import start_watchdog
 
 app = typer.Typer(
@@ -266,8 +265,11 @@ def scan(
             console.print(f"[red]{exc}[/]")
             raise typer.Exit(2)
 
+    in_scope = [c for c in companies if c.ats != "simplify"]
+    covered = sum(1 for c in in_scope if c.covered_by)
     console.print(
-        f"Scanning {len(resolved)} resolved companies (of {len(companies)} in scope)…"
+        f"Scanning {len(resolved)} resolved companies (of {len(in_scope)} in scope, "
+        f"{covered} covered by a parent board)…"
     )
 
     # Hard watchdog + startup jitter (unchanged from v1).
@@ -420,11 +422,9 @@ def list_matches(
     since: str = typer.Option(
         None, "--since", help="Only postings first seen since e.g. '7d' or ISO date."
     ),
-    max_priority: int = typer.Option(None, "--max-priority"),
     db_path: str = typer.Option(None, "--db", help=DB_HELP),
 ) -> None:
-    """Print eligible stored postings ordered by company priority then location tier."""
-    cfg = load_config()
+    """Print eligible stored postings, newest first."""
     since_dt = _parse_since(since)
     conn = v2db.connect(db_path)
     try:
@@ -440,24 +440,15 @@ def list_matches(
     finally:
         conn.close()
 
-    items = []
-    for r in rows:
-        prio = cfg.company_priority.get(r["company"], 4)
-        if max_priority is not None and prio > max_priority:
-            continue
-        items.append((prio, location_tier(r["location_raw"], cfg.location_tiers), r))
-    items.sort(key=lambda x: (x[0], x[1]))
+    rows = sorted(rows, key=lambda r: r["posted_at"] or "", reverse=True)
 
     table = Table(title="Eligible postings")
-    for col in ("Prio", "Company", "Location", "Tier", "Level", "Title"):
+    for col in ("Company", "Location", "Level", "Title"):
         table.add_column(col)
-    for prio, tier, r in items:
-        prio_label = PRIORITY_LABELS.get(prio, PRIORITY_LABELS[4])[0]
+    for r in rows:
         table.add_row(
-            f"P{prio} {prio_label}",
             r["company"],
             r["location_raw"] or "-",
-            LOCATION_LABELS.get(tier, "Other"),
             r["level"] or "-",
             f"[link={r['url']}]{r['title']}[/link]",
         )
@@ -540,7 +531,7 @@ def run_doctor() -> list[tuple[str, bool, str]]:
     try:
         loaded = load_config()
         lt = loaded.criteria.llm_tiebreak
-        n = sum(1 for c in loaded.companies if c.ats)
+        n = sum(1 for c in loaded.companies if c.ats and c.ats != "simplify")
         checks.append(
             (
                 "company endpoints",
@@ -636,7 +627,7 @@ def subscriber_list(db_path: str = typer.Option(None, "--db", help=DB_HELP)) -> 
     finally:
         conn.close()
     table = Table(title="Subscribers")
-    for col in ("ID", "Status", "Webhook", "Countries", "Levels", "Activated", "Health"):
+    for col in ("ID", "Status", "Webhook", "Countries", "Levels", "Grad", "Activated", "Health"):
         table.add_column(col)
     for s in subs:
         try:
@@ -646,7 +637,7 @@ def subscriber_list(db_path: str = typer.Option(None, "--db", help=DB_HELP)) -> 
         status = s.status + (f" ({s.disabled_reason})" if s.disabled_reason else "")
         table.add_row(
             str(s.id), status, masked, ",".join(s.countries), ",".join(s.levels),
-            (s.activated_at or "-")[:19], f"ok={s.last_ok_at or '-'} fails={s.fail_count}",
+            s.grad_date or "-", (s.activated_at or "-")[:19], f"ok={s.last_ok_at or '-'} fails={s.fail_count}",
         )
     console.print(table)
 
@@ -872,7 +863,7 @@ def heartbeat(
 ) -> None:
     """Post a periodic liveness/status summary to Discord (silence = broken)."""
     cfg = load_config()
-    watchlist = len([c for c in cfg.companies if c.ats])
+    watchlist = len([c for c in cfg.companies if c.ats and c.ats != "simplify"])
     counts = _heartbeat_db_counts(db_path)
 
     last_run = _read_last_run()

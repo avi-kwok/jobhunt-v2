@@ -120,11 +120,15 @@ criteria:
     - phd
     - ph.d
     - mba
+    - master's
+    - masters
+    - graduate student
+    - mba candidate
     - full-time        # tune: remove if it drops valid "full-time internship" posts
 
   # Phrases stripped from the title BEFORE exclude_terms is checked.
   # "BS/MS/PhD" postings are open to undergrads; keep them past the "phd" exclude.
-  exclude_exempt_terms: [bs/ms/phd, ms/phd]
+  exclude_exempt_terms: [bs/ms/phd, ms/phd, bs/ms, "bachelor's/master's", bachelors/masters, "bachelor's or master's"]
 
   # Defense / aerospace / automotive / industrial / semiconductor-hardware / pharma
   # employers where an ambiguous role title with no software anchor ("Systems
@@ -149,16 +153,16 @@ criteria:
   # disable and use the seen-store alone.
   freshness_minutes: 360
 
-  # LLM TIE-BREAK (llm_tiebreak.py). A title whose ONLY role match is an ambiguous
-  # term above, and that passes every other gate (intern/co-op, excludes, years,
-  # location, freshness), gets one Claude Haiku call; its yes/no replaces the rules'
-  # verdict (tagged "llm" in posting_tags). Once per posting, shared by all
+  # LLM REVIEW (llm_tiebreak.py). Every title with a role match that passes every other
+  # gate (intern/co-op, excludes, years, location, freshness) gets one Claude Haiku
+  # call: it can reject non-software or grad-only roles, and decides ambiguous-only
+  # titles outright (tagged "llm" in posting_tags). Once per posting, shared by all
   # subscribers. Inert without ANTHROPIC_API_KEY in .env. When a cap is hit, or on
   # any API error/refusal, the rules decide. Spend: logs/llm_usage.json.
   llm_tiebreak:
     enabled: true
     model: claude-haiku-5-5
-    max_calls_per_scan: 50
+    max_calls_per_scan: 100
     daily_usd_cap: 0.25
 
 # ---------------------------------------------------------------------------
@@ -290,6 +294,7 @@ companies:
   - name: Adyen
   - name: Affirm
   - name: Afterpay
+    covered_by: Block
   - name: Airbnb
   - name: Airtable
   - name: Akamai Technologies
@@ -310,6 +315,7 @@ companies:
   - name: ASML
   - name: Atlassian
   - name: Audible
+    covered_by: Amazon
   - name: Aurora Innovation
   - name: Autodesk
   - name: Avalara
@@ -343,6 +349,7 @@ companies:
   - name: Capital One
   - name: Carta
   - name: Cash App
+    covered_by: Block
   - name: Caterpillar
   - name: Cboe Global Markets
   - name: Character.AI
@@ -368,6 +375,7 @@ companies:
   - name: Coupang
   - name: CPP Investments
   - name: Credit Karma
+    covered_by: Intuit
   - name: CrowdStrike
   - name: CyberArk
   - name: D. E. Shaw
@@ -486,12 +494,14 @@ companies:
   - name: Motorola Solutions
   - name: MSCI
   - name: MuleSoft
+    covered_by: Salesforce
   - name: Nasdaq
   - name: National Bank of Canada
   - name: Neo Financial
   - name: NetApp
   - name: Netflix
   - name: NetSuite
+    covered_by: Oracle
   - name: New Relic
   - name: Nextdoor
   - name: Nintendo
@@ -567,6 +577,7 @@ companies:
   - name: Shopify
   - name: Siemens
   - name: Slack
+    covered_by: Salesforce
   - name: Smartsheet
   - name: Snap
   - name: Snowflake
@@ -578,6 +589,7 @@ companies:
   - name: Splunk
   - name: Spotify
   - name: Square
+    covered_by: Block
   - name: StackAdapt
   - name: State Street
   - name: Stripe
@@ -586,6 +598,7 @@ companies:
   - name: SIG               # Susquehanna International Group
   - name: Synopsys
   - name: Tableau
+    covered_by: Salesforce
   - name: TD                # TD Bank / Toronto-Dominion Bank
   - name: TELUS
   - name: Tenable
@@ -615,6 +628,7 @@ companies:
   - name: Virtu Financial
   - name: Visa
   - name: VMware
+    covered_by: Broadcom
   - name: Walmart Global Tech
   - name: Wayfair
   - name: Waymo

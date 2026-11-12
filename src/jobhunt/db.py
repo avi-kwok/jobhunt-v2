@@ -19,7 +19,7 @@ from .classify import Classification
 from .models import Job
 
 DEFAULT_DB_PATH = Path("jobhunt_v2.db")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 PENDING_RETRY_AFTER = timedelta(hours=1)
 MAX_FAIL_CYCLES = 5
 RETENTION_DAYS = 90
@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS posting_tags (
     remote          INTEGER NOT NULL DEFAULT 0,
     location_opaque INTEGER NOT NULL DEFAULT 0,
     classified_at   TEXT NOT NULL,
-    rules_version   INTEGER NOT NULL
+    rules_version   INTEGER NOT NULL,
+    terms           TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS subscribers (
@@ -72,7 +73,8 @@ CREATE TABLE IF NOT EXISTS subscribers (
     last_ok_at          TEXT,
     fail_count          INTEGER NOT NULL DEFAULT 0,
     verify_count        INTEGER NOT NULL DEFAULT 0,
-    verify_window_start TEXT
+    verify_window_start TEXT,
+    grad_date           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS deliveries (
@@ -218,7 +220,28 @@ def init_schema(conn: Conn) -> None:
         conn.raw.executescript(_SCHEMA_SQLITE)
     if conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 0:
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+    elif schema_version(conn) < SCHEMA_VERSION:
+        _migrate(conn)
+        conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
     conn.commit()
+
+
+def _migrate(conn: Conn) -> None:
+    """Additive migrations from older schema versions (the CREATEs above are IF NOT EXISTS)."""
+    # v2 -> v3: posting_tags.terms (JSON list of "Season YYYY"); old rows default to '[]'.
+    if conn.is_postgres:
+        conn.execute("ALTER TABLE posting_tags ADD COLUMN IF NOT EXISTS terms TEXT NOT NULL DEFAULT '[]'")
+    else:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(posting_tags)").fetchall()}
+        if "terms" not in cols:
+            conn.execute("ALTER TABLE posting_tags ADD COLUMN terms TEXT NOT NULL DEFAULT '[]'")
+    # v3 -> v4: subscribers.grad_date ("YYYY-MM", NULL = no graduation filter).
+    if conn.is_postgres:
+        conn.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS grad_date TEXT")
+    else:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(subscribers)").fetchall()}
+        if "grad_date" not in cols:
+            conn.execute("ALTER TABLE subscribers ADD COLUMN grad_date TEXT")
 
 
 def schema_version(conn: Conn) -> int:
@@ -307,6 +330,12 @@ def untagged_postings(conn: Conn, limit: int) -> list[Job]:
     return [job_from_row(r) for r in rows]
 
 
+def update_location(conn: Conn, uid: str, location: str) -> None:
+    """Replace a stored posting's raw location (e.g. a resolved "2 Locations")."""
+    conn.execute("UPDATE postings SET location_raw=? WHERE uid=?", (location, uid))
+    conn.commit()
+
+
 def touch_postings(conn: Conn, uids: list[str], now: datetime | None = None) -> None:
     """Mark postings still on the board (at most one write per posting per day)."""
     now = now or datetime.now(timezone.utc)
@@ -331,18 +360,19 @@ def upsert_tags_many(
     stamp = classified_at or utcnow_iso()
     conn.executemany(
         "INSERT INTO posting_tags (uid, eligible, reject_reason, categories, level, countries, "
-        "cities, remote, location_opaque, classified_at, rules_version) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+        "cities, remote, location_opaque, classified_at, rules_version, terms) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(uid) DO UPDATE SET eligible=excluded.eligible, "
         "reject_reason=excluded.reject_reason, categories=excluded.categories, "
         "level=excluded.level, countries=excluded.countries, cities=excluded.cities, "
         "remote=excluded.remote, location_opaque=excluded.location_opaque, "
-        "classified_at=excluded.classified_at, rules_version=excluded.rules_version",
+        "classified_at=excluded.classified_at, rules_version=excluded.rules_version, "
+        "terms=excluded.terms",
         [
             (
                 uid, int(c.eligible), c.reject_reason, json.dumps(c.categories), c.level,
                 json.dumps(c.countries), json.dumps(c.cities), int(c.remote),
-                int(c.location_opaque), stamp, c.rules_version,
+                int(c.location_opaque), stamp, c.rules_version, json.dumps(c.terms),
             )
             for uid, c in items
         ],
@@ -368,6 +398,7 @@ def tags_from_row(row) -> Classification:
         remote=bool(row["remote"]),
         location_opaque=bool(row["location_opaque"]),
         rules_version=row["rules_version"],
+        terms=json.loads(row["terms"]),
     )
 
 
@@ -401,11 +432,12 @@ class Subscriber:
     disabled_reason: str | None = None
     last_ok_at: str | None = None
     fail_count: int = 0
+    grad_date: str | None = None
 
 
 _SUB_COLS = (
     "id, status, countries, levels, webhook_enc, created_at, activated_at, "
-    "disabled_reason, last_ok_at, fail_count"
+    "disabled_reason, last_ok_at, fail_count, grad_date"
 )
 
 
@@ -415,7 +447,7 @@ def _sub_from_row(r) -> Subscriber:
         levels=json.loads(r["levels"]), webhook_enc=r["webhook_enc"],
         created_at=r["created_at"], activated_at=r["activated_at"],
         disabled_reason=r["disabled_reason"], last_ok_at=r["last_ok_at"],
-        fail_count=r["fail_count"],
+        fail_count=r["fail_count"], grad_date=r["grad_date"],
     )
 
 
@@ -428,16 +460,17 @@ def add_subscriber(
     *,
     status: str = "pending",
     manage_token_hash: str | None = None,
+    grad_date: str | None = None,
 ) -> int | None:
     """Insert a subscriber. Returns the new id, or None if that webhook already exists."""
     now = utcnow_iso()
     row = conn.execute(
         "INSERT INTO subscribers (webhook_hash, webhook_enc, manage_token_hash, status, "
-        "countries, levels, created_at, activated_at) VALUES (?,?,?,?,?,?,?,?) "
+        "countries, levels, created_at, activated_at, grad_date) VALUES (?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT (webhook_hash) DO NOTHING RETURNING id",
         (
             webhook_hash, webhook_enc, manage_token_hash, status, json.dumps(countries),
-            json.dumps(levels), now, now if status == "active" else None,
+            json.dumps(levels), now, now if status == "active" else None, grad_date,
         ),
     ).fetchone()
     conn.commit()
@@ -509,6 +542,11 @@ def set_prefs(conn: Conn, sub_id: int, countries: list[str], levels: list[str]) 
         "UPDATE subscribers SET countries=?, levels=? WHERE id=?",
         (json.dumps(countries), json.dumps(levels), sub_id),
     )
+    conn.commit()
+
+
+def set_grad_date(conn: Conn, sub_id: int, grad_date: str | None) -> None:
+    conn.execute("UPDATE subscribers SET grad_date=? WHERE id=?", (grad_date, sub_id))
     conn.commit()
 
 
@@ -593,7 +631,7 @@ def candidate_rows(conn: Conn, activated_at: str) -> list:
     """Eligible postings first seen at/after `activated_at`, joined with their tags."""
     return conn.execute(
         "SELECT p.*, t.eligible, t.reject_reason, t.categories, t.level, t.countries, "
-        "t.cities, t.remote, t.location_opaque, t.rules_version "
+        "t.cities, t.remote, t.location_opaque, t.rules_version, t.terms "
         "FROM postings p JOIN posting_tags t ON t.uid = p.uid "
         "WHERE t.eligible = 1 AND p.first_seen_at >= ?",
         (activated_at,),

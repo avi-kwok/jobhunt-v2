@@ -22,6 +22,10 @@
 <fieldset><legend>Levels</legend>
 <label><input type="checkbox" name="levels" value="internship" checked> Internship</label>
 <label><input type="checkbox" name="levels" value="coop" checked> Co-op</label></fieldset>
+<fieldset><legend>Expected graduation (optional)</legend>
+<label>Month <select name="grad_month"><option value="">No filter</option>{% for m in range(1, 13) %}<option value="{{ m }}" {% if grad_month_sel == m|string %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+<label>Year <select name="grad_year"><option value="">No filter</option>{% for y in grad_years %}<option value="{{ y }}" {% if grad_year_sel == y|string %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></label>
+<p class="muted">Hides terms that start on or after your graduation month. Postings with no stated term are always sent.</p></fieldset>
 <div><button type="submit">Send me a confirmation link</button></div>
 </form>
 <p class="muted">We post a private link in your channel. Opening it and pressing Activate proves you can read the channel.</p>

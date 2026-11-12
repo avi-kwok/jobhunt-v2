@@ -607,3 +607,41 @@ def test_workday_429_during_facet_discovery_retries_sequentially(monkeypatch):
         CompanyConfig(name="Acme", ats="workday", tenant="acme", wd="wd5", site="careers")
     )
     assert calls == {"discover": 2, "workers": [1]}
+
+
+@respx.mock
+def test_workday_retries_once_on_non_json_body(monkeypatch):
+    """A 200 with an empty/HTML body ("Expecting value") is transient: retry once, then parse."""
+    from jobhunt.adapters import workday as workday_mod
+
+    monkeypatch.setattr(workday_mod.time, "sleep", lambda *a, **k: None)
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/careers/jobs"
+    posting = {"title": "SWE Intern", "externalPath": "/job/SWE-Intern_R1", "locationsText": "Seattle"}
+    route = respx.post(url).mock(
+        side_effect=[
+            httpx.Response(200, text=""),  # first try: non-JSON body
+            httpx.Response(200, json={"total": 1, "jobPostings": [posting]}),
+        ]
+    )
+    jobs = WorkdayAdapter(client=httpx.Client())._search(
+        url, "https://acme.wd5.myworkdayjobs.com/careers",
+        CompanyConfig(name="Acme", ats="workday", tenant="acme", wd="wd5", site="careers"), "intern",
+    )
+    assert route.call_count == 2
+    assert [j.title for j in jobs] == ["SWE Intern"]
+
+
+@respx.mock
+def test_workday_non_json_twice_still_raises(monkeypatch):
+    """Only one retry: a board that keeps sending non-JSON still errors (reported, not hidden)."""
+    from jobhunt.adapters import workday as workday_mod
+
+    monkeypatch.setattr(workday_mod.time, "sleep", lambda *a, **k: None)
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/careers/jobs"
+    route = respx.post(url).mock(return_value=httpx.Response(200, text="<html>maintenance</html>"))
+    with pytest.raises(ValueError):
+        WorkdayAdapter(client=httpx.Client())._search(
+            url, "https://acme.wd5.myworkdayjobs.com/careers",
+            CompanyConfig(name="Acme", ats="workday", tenant="acme", wd="wd5", site="careers"), "intern",
+        )
+    assert route.call_count == 2

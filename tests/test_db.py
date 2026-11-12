@@ -22,7 +22,7 @@ def _count(conn, table):
 
 
 def test_version_and_idempotent_init(conn):
-    assert db.schema_version(conn) == 2
+    assert db.schema_version(conn) == 4
     db.init_schema(conn)
     assert _count(conn, "schema_version") == 1
     assert _count(conn, "rate_limits") == 0
@@ -247,3 +247,77 @@ def test_upsert_tags_many_one_commit_and_updates(conn):
     assert len(rows) == 3
     assert rows[js[0].uid]["eligible"] == 1 and rows[js[0].uid]["level"] == "coop"
     assert rows[js[1].uid]["reject_reason"] == "x"
+
+
+def test_terms_round_trip(conn):
+    j = _job(1)
+    db.insert_new_postings(conn, [j], seen_at=db.to_iso(NOW))
+    db.upsert_tags(conn, j.uid, Classification(eligible=True, level="internship",
+                                               terms=["Summer 2027", "Fall 2027"]))
+    row = conn.execute("SELECT * FROM posting_tags WHERE uid = ?", (j.uid,)).fetchone()
+    assert db.tags_from_row(row).terms == ["Summer 2027", "Fall 2027"]
+    (cand,) = db.candidate_rows(conn, db.to_iso(NOW - timedelta(days=1)))
+    assert db.tags_from_row(cand).terms == ["Summer 2027", "Fall 2027"]
+
+
+def test_migrates_v2_database(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (2);"
+        "CREATE TABLE postings (uid TEXT PRIMARY KEY, source TEXT NOT NULL, company TEXT NOT NULL,"
+        " title TEXT NOT NULL, url TEXT NOT NULL, location_raw TEXT, posted_at TEXT, posted_note TEXT,"
+        " first_seen_at TEXT NOT NULL, last_seen_at TEXT);"
+        "CREATE TABLE posting_tags (uid TEXT PRIMARY KEY REFERENCES postings(uid) ON DELETE CASCADE,"
+        " eligible INTEGER NOT NULL, reject_reason TEXT, categories TEXT NOT NULL DEFAULT '[]',"
+        " level TEXT, countries TEXT NOT NULL DEFAULT '[]', cities TEXT NOT NULL DEFAULT '[]',"
+        " remote INTEGER NOT NULL DEFAULT 0, location_opaque INTEGER NOT NULL DEFAULT 0,"
+        " classified_at TEXT NOT NULL, rules_version INTEGER NOT NULL);"
+        "INSERT INTO postings VALUES ('u','s','c','t','url',NULL,NULL,NULL,'2026-01-01',NULL);"
+        "INSERT INTO posting_tags VALUES ('u',1,NULL,'[]',NULL,'[]','[]',0,0,'2026-01-01',2);"
+    )
+    raw.commit()
+    raw.close()
+    c = db.connect(path)
+    assert db.schema_version(c) == 4
+    assert db.tags_from_row(c.execute("SELECT * FROM posting_tags").fetchone()).terms == []
+    db.init_schema(c)  # idempotent
+    assert db.schema_version(c) == 4
+    c.close()
+
+
+def test_migrates_v3_database_adds_grad_date(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "v3.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (3);"
+        "CREATE TABLE subscribers (id INTEGER PRIMARY KEY AUTOINCREMENT, webhook_hash TEXT NOT NULL UNIQUE,"
+        " webhook_enc TEXT NOT NULL, manage_token_hash TEXT UNIQUE, status TEXT NOT NULL DEFAULT 'pending',"
+        " disabled_reason TEXT, countries TEXT NOT NULL DEFAULT '[\"CA\",\"US\"]',"
+        " levels TEXT NOT NULL DEFAULT '[\"internship\",\"coop\"]', created_at TEXT NOT NULL,"
+        " activated_at TEXT, last_ok_at TEXT, fail_count INTEGER NOT NULL DEFAULT 0,"
+        " verify_count INTEGER NOT NULL DEFAULT 0, verify_window_start TEXT);"
+        "INSERT INTO subscribers (webhook_hash, webhook_enc, created_at) VALUES ('h','e','2026-01-01');"
+    )
+    raw.commit()
+    raw.close()
+    c = db.connect(path)
+    assert db.schema_version(c) == 4
+    (s,) = db.list_subscribers(c)
+    assert s.grad_date is None
+    db.set_grad_date(c, s.id, "2028-04")
+    assert db.get_subscriber(c, s.id).grad_date == "2028-04"
+    db.set_grad_date(c, s.id, None)
+    assert db.get_subscriber(c, s.id).grad_date is None
+    db.init_schema(c)  # idempotent
+    assert db.schema_version(c) == 4
+    c.close()
+
+
+def test_add_subscriber_grad_date(conn):
+    sid = db.add_subscriber(conn, "h1", "e", ["CA"], ["coop"], grad_date="2027-12")
+    assert db.get_subscriber(conn, sid).grad_date == "2027-12"

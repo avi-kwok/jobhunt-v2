@@ -12,7 +12,11 @@ operations: `docs/RUNBOOK.md`. History: `docs/v2-phase0.md`.
 1. `ingest` - fetch every company board, store postings not seen before. Stale ones are stored
    and tagged ineligible.
 2. `classify_new` - deterministic rules (`classify.py`): level, SWE category, seniority and years
-   excludes, CA/US location. No LLM.
+   excludes (incl. graduate-degree titles), CA/US location (city gazetteer resolves "City, CA"
+   to California vs Canada), term tags ("Summer 2027"). Then, when `ANTHROPIC_API_KEY` is set,
+   one Haiku review call per rule-eligible (or ambiguous-title) posting (`llm_tiebreak.py`): it can
+   reject non-software or grad-only roles and adds term tags. It never changes country detection;
+   on any failure or cap the rules decide.
 3. `match_subscribers` - per active subscriber: eligible postings first seen at/after activation
    whose level is in `levels` and country in `countries`. Opaque locations ("Multiple Locations")
    and country-less remote roles pass. Best first: location tier, then company priority.
@@ -29,7 +33,23 @@ resets `fail_count` and sets `last_ok_at`.
 deliveries sent and failed in 24h, plus cron liveness (mtime of `logs/worker.log`, which cron
 appends to on every fire; stale after 90 min).
 
-## Database (`db.py`, schema version 2)
+## Coverage: subsidiary aliases and the Simplify fallback
+
+- `covered_by: <Parent>` on a `config.yaml` company marks a subsidiary whose postings already
+  arrive under the parent's board (e.g. Slack -> Salesforce). It is counted as covered, never fetched.
+- Companies with no `ats` and no `covered_by` are served by the `simplify` adapter, attached to
+  one pseudo-company (`SimplifyJobs` in `companies.resolved.yaml`). The config loader computes its
+  allowlist (`simplify_companies`). A company with an `ats` is never on it, so once a company is
+  resolved it leaves the fallback automatically: no source overlaps.
+- Listings come from the SimplifyJobs `Summer2027-Internships` `listings.json` (thanks to
+  SimplifyJobs for maintaining it). Names match after lowercasing and stripping non-alphanumerics;
+  `Job.company` is the canonical config name. Only active, visible rows posted in the last
+  `SIMPLIFY_MAX_AGE_DAYS = 2` days are emitted, so a first run cannot flood the backlog. Dates are
+  day-granular, so `posted_at` is None and freshness comes from first-seen.
+- The body and ETag are cached in `logs/simplify_cache.json` / `.etag`; the fetch is conditional
+  (`If-None-Match`, 304 reuses the cache). A failed fetch raises; stale data is never served silently.
+
+## Database (`db.py`, schema version 4)
 
 SQLite by default (local dev, tests). Postgres when `DATABASE_URL` is set (psycopg 3,
 `prepare_threshold=None` for Supabase's pooler). One API; `?` placeholders are translated for
@@ -39,10 +59,31 @@ ISO-8601 UTC TEXT. `jobhunt db init` creates the schema (idempotent).
 | Table | Purpose |
 |---|---|
 | `postings` | one row per job; PK `uid` |
-| `posting_tags` | 1:1 classification (eligible, level, countries, ...) |
-| `subscribers` | id, `webhook_hash` (UNIQUE), `webhook_enc`, `manage_token_hash` (UNIQUE, nullable), `status` (pending/active/paused/disabled), `disabled_reason`, `countries`, `levels`, `created_at`, `activated_at`, `last_ok_at`, `fail_count`, `verify_count`, `verify_window_start` |
+| `posting_tags` | 1:1 classification (eligible, level, countries, `terms` JSON list of "Season YYYY", ...) |
+| `subscribers` | id, `webhook_hash` (UNIQUE), `webhook_enc`, `manage_token_hash` (UNIQUE, nullable), `status` (pending/active/paused/disabled), `disabled_reason`, `countries`, `levels`, `created_at`, `activated_at`, `last_ok_at`, `fail_count`, `verify_count`, `verify_window_start`, `grad_date` ("YYYY-MM", NULL = no filter) |
 | `deliveries` | PK (`subscriber_id`, `uid`), `status` (pending/sent/failed), `attempts`, `updated_at`, `sent_at`; cascades from both parents |
 | `rate_limits` | `key_hash`, `window_start`, `count` (per-IP subscribe limit; rows older than 2 h are pruned on write) |
+
+### Graduation-date filter (optional)
+
+A subscriber may set an expected graduation month (`subscribers.grad_date`, "YYYY-MM"; set on the
+signup form or `/manage` with month/year selects, year = current UTC year .. +6). `match.matches`
+applies it last: a posting passes if `grad_date` is NULL or malformed, the posting has no `terms`,
+or ANY term starts strictly before the first day of the grad month. Term start months: Winter 01,
+Spring 03, Summer 05, Fall 09 (of the term's year). Example, grad 2028-04: Summer 2027, Fall 2027,
+Winter 2028 pass; Summer 2028 fails. Postings with no stated term are always sent.
+
+Migration v3 -> v4 is additive (`ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS grad_date TEXT` on
+Postgres; PRAGMA-guarded `ADD COLUMN` on SQLite) and runs inside `init_schema` on the first
+`db.connect()` of any process (web cold start, worker, `jobhunt db init`) whose DB is below the code's
+`SCHEMA_VERSION`. Deploy order is therefore safe either way: whichever side connects first migrates;
+an old worker against a v4 DB is unaffected (it never selects `grad_date`).
+
+## Data attribution
+
+`src/jobhunt/data/cities_us_ca.tsv` is derived from GeoNames `cities1000` (https://www.geonames.org/),
+licensed CC BY 4.0. Rebuild with `python scripts/build_cities.py`. It is loaded lazily on first
+location lookup.
 
 ## Secrets
 

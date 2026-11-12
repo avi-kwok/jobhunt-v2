@@ -35,6 +35,7 @@ jobhunt = "jobhunt.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jobhunt"]
+artifacts = ["src/jobhunt/data/*.tsv"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

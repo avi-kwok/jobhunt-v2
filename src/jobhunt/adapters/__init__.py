@@ -8,7 +8,7 @@ from . import (  # noqa: F401,E402
     apple, avature, balyasny, bamboohr, deel, digitalrecruiters, eightfold, epic,
     gem, ibm, icims, jazzhr, jobvite, njoyn, oraclehcm, phenom, pinpoint, radancy,
     recruitee, rentec, rippling, smartrecruiters, successfactors, successfactors_sitemap,
-    workable,
+    simplify, workable,
 )
 
 __all__ = ["Adapter", "get_adapter", "register", "registered_ats"]

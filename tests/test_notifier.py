@@ -11,7 +11,7 @@ from jobhunt.models import Job
 
 
 def _embed(job: Job) -> dict:
-    return alert_embed(job, 1, 1, "internship", ["swe"])
+    return alert_embed(job, ["CA"], "internship", ["swe"])
 
 
 def _posted_field(job: Job) -> str:

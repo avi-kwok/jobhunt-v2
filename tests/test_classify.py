@@ -20,8 +20,8 @@ def cls(title, location=None, description=None, company="X"):
 
 
 def test_rules_version():
-    assert RULES_VERSION == 2
-    assert cls("Software Engineer Intern").rules_version == 2
+    assert RULES_VERSION == 3
+    assert cls("Software Engineer Intern").rules_version == 3
 
 
 @pytest.mark.parametrize(
@@ -360,3 +360,78 @@ def test_state_code_ignored_inside_foreign_segment():
     assert c.countries == [] and not c.eligible
     # a US segment next to a foreign one still counts
     assert cls("Software Engineer Intern", "Austin, TX; Bangalore, India").countries == ["US"]
+
+
+# ---- city gazetteer ("CA" = Canada or California) ----------------------------
+
+
+@pytest.mark.parametrize("loc,countries", [
+    ("Fremont, CA", ["US"]),
+    ("Fremont, CA 94538", ["US"]),
+    ("Palo Alto, CA", ["US"]),
+    ("Toronto, ON", ["CA"]),
+    ("Vancouver, CA", ["CA"]),          # Vancouver exists in BC and WA, not California
+    ("Remote - CA", ["CA"]),            # no city: unchanged fallback
+    ("Waterloo, ON; Fremont, CA", ["CA", "US"]),
+    ("Boulder, CO", ["US"]),
+    ("Amsterdam, NL", []),              # Netherlands, not Newfoundland
+])
+def test_gazetteer_country(loc, countries):
+    assert cls("Software Engineer Intern", loc).countries == countries
+
+
+# ---- graduate-degree titles ---------------------------------------------------
+
+
+@pytest.mark.parametrize("title", [
+    "Software Engineer Intern - Master's", "Software Engineer Intern (Masters)",
+    "Software Engineering Graduate Student Intern", "Software Engineer Intern, MBA Candidate",
+])
+def test_grad_titles_excluded(title):
+    c = cls(title, "Toronto, ON")
+    assert not c.eligible and c.reject_reason.startswith("excluded title term")
+
+
+@pytest.mark.parametrize("title", [
+    "Software Engineer Intern (BS/MS)", "Software Engineer Intern, Bachelor's/Master's",
+    "Software Engineer Intern - Bachelors/Masters", "Software Engineer Intern (Bachelor's or Master's)",
+])
+def test_mixed_undergrad_grad_titles_survive(title):
+    assert cls(title, "Toronto, ON").eligible
+
+
+# ---- term tags ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text,terms", [
+    ("Software Engineer Intern, Summer 2027", ["Summer 2027"]),
+    ("SWE Intern (Winter/Spring 2027)", ["Winter 2027", "Spring 2027"]),
+    ("Fall 2026 Co-op", ["Fall 2026"]),
+    ("2027 Summer Software Intern", ["Summer 2027"]),
+    ("Autumn 2026 Intern", ["Fall 2026"]),
+    ("Summer 2027 or Fall 2027", ["Summer 2027", "Fall 2027"]),
+    ("Software Engineer Intern", []),
+])
+def test_parse_terms(text, terms):
+    from jobhunt.classify import parse_terms
+
+    assert parse_terms(text) == terms
+
+
+def test_terms_merge_title_and_job_terms():
+    job = Job(source="x", company="X", external_id="1", title="SWE Intern Summer 2027", url="u",
+              location="Toronto, ON", terms=["Summer 2027", "Fall 2027"])
+    assert classify(job, CFG.criteria, CFG.location_tiers).terms == ["Summer 2027", "Fall 2027"]
+
+
+def test_curly_apostrophe_masters_excluded():
+    """Titles with a typographic apostrophe ("Master’s") hit the same exclude as "master's"."""
+    from jobhunt.config import load_config
+    from jobhunt.models import Job
+
+    cfg = load_config()
+    for title in ("Software Engineer Intern (Master’s)", "Software Engineer Intern (Master's)"):
+        job = Job(source="t", company="Acme", external_id="1", title=title,
+                  url="https://x.example", location="Toronto, ON")
+        c = classify(job, cfg.criteria, cfg.location_tiers)
+        assert not c.eligible and "master" in (c.reject_reason or "")

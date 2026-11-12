@@ -10,6 +10,7 @@ import hmac
 import ipaddress
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -103,6 +104,28 @@ def _prefs(countries: list[str], levels: list[str]) -> tuple[list[str], list[str
     return (c, l) if c and l else None
 
 
+def _grad_years() -> list[int]:
+    y = datetime.now(timezone.utc).year
+    return list(range(y, y + 7))
+
+
+def _grad_date(month: str, year: str) -> tuple[bool, str | None]:
+    """(valid, "YYYY-MM" or None). Both blank = no filter; anything else must be in range."""
+    month, year = month.strip(), year.strip()
+    if not month and not year:
+        return True, None
+    if not (month.isascii() and month.isdigit() and year.isascii() and year.isdigit()):
+        return False, None
+    if not 1 <= int(month) <= 12 or int(year) not in _grad_years():
+        return False, None
+    return True, f"{int(year):04d}-{int(month):02d}"
+
+
+def _grad_ctx(current: str | None = None) -> dict:
+    cur = current if current and len(current) == 7 else ""
+    return {"grad_years": _grad_years(), "grad_year_sel": cur[:4], "grad_month_sel": cur[5:].lstrip("0")}
+
+
 def _discord_post(wh: webhooks.Webhook, embed: dict) -> bool:
     """Best-effort post into the channel. Returns success; never raises or logs the URL."""
     try:
@@ -125,7 +148,7 @@ def _webhook_exists(wh: webhooks.Webhook) -> bool:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    return _page(request, "index.html", error=None)
+    return _page(request, "index.html", error=None, **_grad_ctx())
 
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -167,6 +190,8 @@ def subscribe(
     webhook_url: str = Form(""),
     countries: list[str] = Form([]),
     levels: list[str] = Form([]),
+    grad_month: str = Form(""),
+    grad_year: str = Form(""),
 ):
     conn = _open()
     try:
@@ -174,12 +199,13 @@ def subscribe(
         if not db.rate_limit_hit(conn, ip_key, SUBSCRIBE_PER_IP_PER_HOUR):
             return _page(request, "check.html")
         prefs = _prefs(countries, levels)
+        grad_ok, grad = _grad_date(grad_month, grad_year)
         try:
             wh = webhooks.parse(webhook_url)
         except webhooks.WebhookError:
             wh = None
-        if wh is None or prefs is None or not _webhook_exists(wh):
-            return _page(request, "index.html", 400, error=_BAD)
+        if wh is None or prefs is None or not grad_ok or not _webhook_exists(wh):
+            return _page(request, "index.html", 400, error=_BAD, **_grad_ctx())
 
         h = crypto.webhook_hash(wh.url)
         token = crypto.new_token()
@@ -188,7 +214,7 @@ def subscribe(
         if sub is None:
             sub_id = db.add_subscriber(
                 conn, h, crypto.encrypt_url(wh.url), prefs[0], prefs[1],
-                manage_token_hash=crypto.token_hash(token),
+                manage_token_hash=crypto.token_hash(token), grad_date=grad,
             )
             if sub_id is None:  # lost a race with a concurrent subscribe: the winner posts
                 return _page(request, "check.html")
@@ -213,7 +239,7 @@ def subscribe(
             db.refund_verify_slot(conn, sub_id)
             if created:  # nothing existed before, so failing visibly leaks nothing
                 db.remove_subscriber(conn, sub_id)
-                return _page(request, "index.html", 400, error=_BAD)
+                return _page(request, "index.html", 400, error=_BAD, **_grad_ctx())
             return _page(request, "check.html")  # existing: keep old token, hide existence
         if not created:
             db.rotate_manage_token(conn, sub_id, crypto.token_hash(token))
@@ -235,7 +261,8 @@ def _lookup(conn, token: str):
 
 def _manage_page(request, sub, token, notice=None, error=None, status=200):
     return _page(request, "manage.html", status, sub=sub, token=token, notice=notice,
-                 error=error, countries=COUNTRIES, levels=LEVELS)
+                 error=error, countries=COUNTRIES, levels=LEVELS,
+                 **_grad_ctx(sub.grad_date))
 
 
 @app.get("/manage", response_class=HTMLResponse)
@@ -257,6 +284,8 @@ def manage_post(
     action: str = Form(""),
     countries: list[str] = Form([]),
     levels: list[str] = Form([]),
+    grad_month: str = Form(""),
+    grad_year: str = Form(""),
 ):
     conn = _open()
     try:
@@ -276,10 +305,14 @@ def manage_post(
             notice = "Alerts paused."
         elif action == "update":
             prefs = _prefs(countries, levels)
+            grad_ok, grad = _grad_date(grad_month, grad_year)
             if prefs is None:
                 error, status = "Pick at least one country and one level.", 400
+            elif not grad_ok:
+                error, status = "Pick a valid graduation month and year, or leave both blank.", 400
             else:
                 db.set_prefs(conn, sub.id, *prefs)
+                db.set_grad_date(conn, sub.id, grad)
                 notice = "Preferences saved."
         elif action == "delete":
             try:

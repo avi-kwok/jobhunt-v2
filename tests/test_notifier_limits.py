@@ -18,7 +18,7 @@ def _job(**kw) -> Job:
 
 
 def _embed(job: Job) -> dict:
-    return alert_embed(job, 1, 1, "internship", ["swe"])
+    return alert_embed(job, ["CA"], "internship", ["swe"])
 
 
 def _fields(embed: dict) -> dict:
@@ -70,7 +70,7 @@ def test_allowed_mentions_sent():
 def test_ten_worst_case_embeds_under_6000():
     worst = _job(title="\\" * 5000, company="*" * 5000, location="[" * 5000,
                  posted_note="p" * 5000)
-    embeds = [alert_embed(worst, 1, 1, "x" * 500, ["y" * 500, "z" * 500]) for _ in range(10)]
+    embeds = [alert_embed(worst, ["CA", "US"], "x" * 500, ["y" * 500, "z" * 500]) for _ in range(10)]
     assert sum(_total(e) for e in embeds) <= 6000
 
 
@@ -84,12 +84,18 @@ def test_company_markdown_escaped_in_title():
     assert e["title"] == "A\\*c\\_me \\[x\\]\\(y\\) — Intern"
 
 
-def test_priority_field_and_no_company_field():
-    e = _embed(_job())
-    f = _fields(e)
-    assert f["Priority"] == "Top priority"
-    assert "Company" not in f
-    assert [x for x in e["fields"] if x["name"] == "Priority"][0]["inline"] is True
+def test_no_priority_or_company_field():
+    f = _fields(_embed(_job(location="Toronto, ON")))
+    assert "Priority" not in f and "Company" not in f
+    assert f["Location"] == "Toronto, ON"
+
+
+def test_color_by_country():
+    j = _job()
+    assert alert_embed(j, ["CA"], "internship", [])["color"] == 0xE74C3C  # red
+    assert alert_embed(j, ["US"], "internship", [])["color"] == 0x3498DB  # blue
+    assert alert_embed(j, ["CA", "US"], "internship", [])["color"] == 0x9B59B6
+    assert alert_embed(j, [], "internship", [])["color"] == 0x95A5A6
 
 
 def test_long_company_and_title_keep_position():
@@ -100,7 +106,7 @@ def test_long_company_and_title_keep_position():
     assert position.startswith("Software Engineering Intern ")
     assert len(position) >= 40 and len(e["title"]) <= 256
     embeds = [alert_embed(_job(company="*" * 500, title=pos, location="[" * 500,
-                               posted_note="p" * 500), 1, 1, "x" * 500, ["y" * 500])
+                               posted_note="p" * 500), ["CA"], "x" * 500, ["y" * 500])
               for _ in range(10)]
     assert all(" — " in x["title"] and len(x["title"]) > 60 for x in embeds)
     assert sum(_total(x) for x in embeds) <= 6000

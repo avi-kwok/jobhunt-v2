@@ -23,6 +23,7 @@ class Job(BaseModel):
     # Human-readable relative posting note for sources that expose no exact
     # timestamp (e.g. Workday's "Posted Today" / "Posted 3 Days Ago").
     posted_note: str | None = None
+    terms: list[str] | None = None  # source-provided work terms, e.g. ["Summer 2027"]
 
     @property
     def uid(self) -> str:
@@ -54,17 +55,23 @@ class CompanyConfig(BaseModel):
     # eightfold: pin the search endpoint ("pcsx" | "legacy") instead of probing pcsx first;
     # for tenants whose pcsx endpoint is known to answer 403.
     eightfold_mode: str | None = None
+    # Subsidiary whose postings already arrive under this parent company's board.
+    # Counted as covered (not unresolved) and never fetched on its own.
+    covered_by: str | None = None
+    # simplify (pseudo-company only): canonical names of in-scope companies with no ATS
+    # and no covered_by; computed by the config loader, never hand-edited.
+    simplify_companies: list[str] | None = None
 
 
 class LLMTiebreakConfig(BaseModel):
-    """`criteria.llm_tiebreak`: one Claude call decides AMBIGUOUS-only role titles.
+    """`criteria.llm_tiebreak`: one Claude review call per rule-eligible (or ambiguous) posting.
 
     Inert without ANTHROPIC_API_KEY. When a cap is reached the rules verdict is used.
     """
 
     enabled: bool = True
     model: str = "claude-haiku-5-5"
-    max_calls_per_scan: int = 50
+    max_calls_per_scan: int = 100
     daily_usd_cap: float = 0.25
 
 

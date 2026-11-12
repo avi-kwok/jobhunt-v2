@@ -38,7 +38,7 @@ export DATABASE_URL="postgresql://postgres.PROJECT_REF:${PW}@POOLER_HOST:5432/po
 Replace `PROJECT_REF` and `POOLER_HOST` with your values, and remove any `[YOUR-PASSWORD]` brackets
 Supabase shows: type only the password at the prompt. Percent-encode reserved characters first.
 
-Expect `Schema ready: backend=postgres, version=2`. Re-running is harmless. A free Supabase
+Expect `Schema ready: backend=postgres, version=4`. Upgrading an existing DB: `jobhunt db init` (or just deploying; the web app and worker migrate on first connect). Re-running is harmless. A free Supabase
 project pauses after 7 days of inactivity; the worker scans every 30 minutes, so it stays awake.
 
 ## 3. Vercel (website)

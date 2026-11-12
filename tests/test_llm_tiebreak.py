@@ -89,7 +89,7 @@ def test_ambiguous_only_llm_yes_overrides_rules_no(cfg):
     assert kw["output_config"]["effort"] == "low"
     fmt = kw["output_config"]["format"]
     assert fmt["type"] == "json_schema"
-    assert fmt["schema"]["required"] == ["is_swe_or_adjacent", "reason"]
+    assert fmt["schema"]["required"] == ["is_software_role", "undergrad_eligible", "level", "terms", "reason"]
     assert not {"temperature", "top_p", "top_k"} & set(kw)
     assert [m["role"] for m in kw["messages"]] == ["user"]  # no assistant prefill
     prompt = kw["messages"][0]["content"]
@@ -110,8 +110,6 @@ def test_ambiguous_only_llm_no_overrides_rules_yes(cfg):
 
 
 @pytest.mark.parametrize("title,kw", [
-    ("Software Engineer Intern", {}),                              # strong term
-    ("Platform Software Engineer Intern", {}),                     # strong + ambiguous
     ("Mechanical Engineer Intern", {}),                            # no role term at all
     ("Platform Engineer", {}),                                     # no intern term
     ("Senior Platform Engineer Intern", {}),                       # exclude term
@@ -285,7 +283,10 @@ def test_classified_once_for_three_subscribers(cfg, conn):
         FakeLLMAdapter.JOBS = []
 
     assert errors == []
-    assert len(client.calls) == 1 and "Systems Engineer Intern" in client.calls[0]["messages"][0]["content"]
+    # one call per eligible-by-rules posting (ambiguous + strong), none for the stale one,
+    # and none per subscriber or on the second cycle
+    assert len(client.calls) == 2
+    assert "Systems Engineer Intern" in client.calls[0]["messages"][0]["content"]
     assert [r.sent for r in res] == [2, 2, 2]
     for route in routes:
         embeds = json.loads(route.calls[0].request.content)["embeds"]
@@ -356,3 +357,59 @@ def test_dashboard_llm_section(conn):
     assert "LLM tie-break (today, UTC)" in html and "<td>7</td>" in html
     assert "<td>0.0004</td>" in html and "<td>0.25</td>" in html
     assert "LLM tie-break" not in dashboard.render_page(conn, "1 min ago", "2 min ago")
+
+
+# ---- review of every rule-eligible posting ------------------------------------
+
+
+def review_resp(software=True, undergrad=True, reason="ok", terms=(), level="internship"):
+    return resp(text=json.dumps({"is_software_role": software, "undergrad_eligible": undergrad,
+                                 "level": level, "terms": list(terms), "reason": reason}))
+
+
+def test_review_software_undergrad_stays_eligible_with_llm_terms(cfg):
+    j = job("Software Engineer Intern", description="Build things.")
+    client = FakeClient(review_resp(terms=["Summer 2027"]))
+    c = classify(j, cfg.criteria, cfg.location_tiers, make_tb(client))
+    assert c.eligible and c.categories == ["swe"] and c.terms == ["Summer 2027"]
+    assert len(client.calls) == 1
+
+
+def test_review_hardware_rejected(cfg):
+    j = job("Software Engineer Intern")
+    c = classify(j, cfg.criteria, cfg.location_tiers,
+                 make_tb(FakeClient(review_resp(software=False, reason="ASIC verification"))))
+    assert not c.eligible and c.reject_reason == "llm: ASIC verification"
+    assert "llm" in c.categories
+
+
+def test_review_masters_only_rejected(cfg):
+    j = job("Software Engineer Intern")
+    c = classify(j, cfg.criteria, cfg.location_tiers,
+                 make_tb(FakeClient(review_resp(undergrad=False, reason="Master's students only"))))
+    assert not c.eligible and c.reject_reason.startswith("llm: ") and "Master" in c.reject_reason
+
+
+def test_review_api_error_rules_decide(cfg):
+    j = job("Software Engineer Intern")
+    tb = make_tb(FakeClient(RuntimeError("boom")))
+    c = classify(j, cfg.criteria, cfg.location_tiers, tb)
+    assert c.eligible and c.categories == ["swe"] and tb.fallbacks == 1
+
+
+def test_review_cap_reached_rules_decide(cfg):
+    client = FakeClient(review_resp(software=False))
+    tb = make_tb(client, max_calls_per_scan=1)
+    a = classify(job("Software Engineer Intern", i=1), cfg.criteria, cfg.location_tiers, tb)
+    b = classify(job("Software Engineer Intern", i=2), cfg.criteria, cfg.location_tiers, tb)
+    assert not a.eligible and b.eligible and tb.capped == 1 and len(client.calls) == 1
+    assert "1 rejected" in tb.summary()
+
+
+def test_review_prompt_truncates_description(cfg):
+    j = job("Software Engineer Intern", description="word " * 2000)
+    client = FakeClient(review_resp())
+    classify(j, cfg.criteria, cfg.location_tiers, make_tb(client))
+    prompt = client.calls[0]["messages"][0]["content"]
+    assert "Acme" in prompt and "Toronto, ON" in prompt
+    assert len(prompt) < llm_tiebreak.SNIPPET_CHARS + 400

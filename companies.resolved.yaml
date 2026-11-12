@@ -1879,3 +1879,6 @@ companies:
   ats: digitalrecruiters
   slug: jobs.momentfactory.com
   site: en
+- name: SimplifyJobs
+  ats: simplify
+  priority: 4

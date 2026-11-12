@@ -19,7 +19,7 @@ def _add(path, env_val=None, **opts):
 
 def test_db_init_and_keygen(tmp_path):
     r = runner.invoke(cli.app, ["db", "init", "--db", str(tmp_path / "x.db")])
-    assert r.exit_code == 0 and "version=2" in r.output
+    assert r.exit_code == 0 and "version=4" in r.output
     r = runner.invoke(cli.app, ["keygen"])
     assert r.exit_code == 0
     from jobhunt import crypto

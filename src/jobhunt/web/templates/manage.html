@@ -14,6 +14,10 @@
 {% for c in countries %}<label><input type="checkbox" name="countries" value="{{ c }}" {% if c in sub.countries %}checked{% endif %}> {{ c }}</label>{% endfor %}</fieldset>
 <fieldset><legend>Levels</legend>
 {% for l in levels %}<label><input type="checkbox" name="levels" value="{{ l }}" {% if l in sub.levels %}checked{% endif %}> {{ l }}</label>{% endfor %}</fieldset>
+<fieldset><legend>Expected graduation (optional)</legend>
+<label>Month <select name="grad_month"><option value="">No filter</option>{% for m in range(1, 13) %}<option value="{{ m }}" {% if grad_month_sel == m|string %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+<label>Year <select name="grad_year"><option value="">No filter</option>{% for y in grad_years %}<option value="{{ y }}" {% if grad_year_sel == y|string %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></label>
+<p class="muted">Hides terms that start on or after your graduation month. Postings with no stated term are always sent.</p></fieldset>
 <div><button type="submit" name="action" value="update" class="alt">Save preferences</button></div>
 </form>
 {% endif %}

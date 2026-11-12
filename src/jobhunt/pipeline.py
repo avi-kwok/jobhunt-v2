@@ -15,12 +15,12 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from . import crypto, db, scheduler, webhooks
-from .adapters import base
+from .adapters import base, workday
 from .adapters.base import get_adapter
 from .classify import RULES_VERSION, Classification, classify
 from .llm_tiebreak import TieBreaker
 from .match import matches, sort_key
-from .matcher import dedupe_by_uid, is_fresh, location_tier
+from .matcher import _is_unresolved_location, dedupe_by_uid, is_fresh
 from .models import AppConfig, Job, PolitenessConfig
 from .notifier import DiscordHTTPError, DiscordNotifier, MAX_EMBEDS_PER_MESSAGE, alert_embed
 from .security import redact
@@ -150,9 +150,32 @@ def ingest(
 # ---- stage 2: classify ----------------------------------------------------
 
 
+def resolve_opaque_locations(
+    conn: db.Conn,
+    jobs: list[Job],
+    resolver: Callable[[str | None], str | None] = workday.resolve_locations,
+) -> int:
+    """Workday lists multi-location postings as "2 Locations", which would pass the
+    CA/US gate unseen. For each new one, fetch the real locations (one detail request)
+    and store them, so classify sees e.g. "Israel, Yokneam; Israel, Tel Aviv".
+    On failure the opaque value stays (and still passes). Returns how many resolved."""
+    n = 0
+    for job in jobs:
+        if job.source != "workday" or not _is_unresolved_location(job.location):
+            continue
+        loc = resolver(job.url)
+        if loc:
+            job.location = loc
+            db.update_location(conn, job.uid, loc)
+            n += 1
+    return n
+
+
 def classify_new(
-    cfg: AppConfig, conn: db.Conn, jobs: list[Job], tiebreak: TieBreaker | None = None
+    cfg: AppConfig, conn: db.Conn, jobs: list[Job], tiebreak: TieBreaker | None = None,
+    resolver: Callable[[str | None], str | None] = workday.resolve_locations,
 ) -> list[tuple[Job, Classification]]:
+    resolve_opaque_locations(conn, jobs, resolver)
     out = [(job, classify(job, cfg.criteria, cfg.location_tiers, tiebreak)) for job in jobs]
     db.upsert_tags_many(conn, [(job.uid, cls) for job, cls in out])
     return out
@@ -186,8 +209,6 @@ def classify_untagged(
 class Candidate:
     job: Job
     tags: Classification
-    company_priority: int
-    location_tier: int
 
 
 def match_subscribers(
@@ -196,7 +217,7 @@ def match_subscribers(
     subs: list[db.Subscriber] | None = None,
 ) -> dict[int, list[Candidate]]:
     """Per active subscriber: eligible postings first seen at/after activation that match
-    their countries/levels and are not already sent or in flight, best-first."""
+    their countries/levels and are not already sent or in flight, newest first."""
     subs = db.list_active_subscribers(conn) if subs is None else subs
     result: dict[int, list[Candidate]] = {}
     for sub in subs:
@@ -208,16 +229,8 @@ def match_subscribers(
             tags = db.tags_from_row(row)
             if not matches(sub, tags):
                 continue
-            job = db.job_from_row(row)
-            cands.append(
-                Candidate(
-                    job=job,
-                    tags=tags,
-                    company_priority=cfg.company_priority.get(job.company, 4),
-                    location_tier=location_tier(job.location, cfg.location_tiers),
-                )
-            )
-        cands.sort(key=lambda c: sort_key(c.location_tier, c.company_priority))
+            cands.append(Candidate(job=db.job_from_row(row), tags=tags))
+        cands.sort(key=lambda c: sort_key(c.job.posted_at))
         result[sub.id] = cands
     return result
 
@@ -275,7 +288,7 @@ def deliver(
     for i in range(0, len(reserved), MAX_EMBEDS_PER_MESSAGE):
         chunk = reserved[i : i + MAX_EMBEDS_PER_MESSAGE]
         embeds = [
-            alert_embed(c.job, c.company_priority, c.location_tier, c.tags.level, c.tags.categories)
+            alert_embed(c.job, c.tags.countries, c.tags.level, c.tags.categories)
             for c in chunk
         ]
         try:
