@@ -44,8 +44,11 @@ appends to on every fire; stale after 90 min).
 - Listings come from the SimplifyJobs `Summer2027-Internships` `listings.json` (thanks to
   SimplifyJobs for maintaining it). Names match after lowercasing and stripping non-alphanumerics;
   `Job.company` is the canonical config name. Only active, visible rows posted in the last
-  `SIMPLIFY_MAX_AGE_DAYS = 2` days are emitted, so a first run cannot flood the backlog. Dates are
-  day-granular, so `posted_at` is None and freshness comes from first-seen.
+  `SIMPLIFY_MAX_AGE_DAYS = 2` days are emitted, so a first run cannot flood the backlog. `date_posted` is
+  when Simplify listed the row, to the second, so it becomes `posted_at` and the normal
+  `freshness_minutes` window applies (a row first seen more than 6 h after Simplify listed it is
+  stored as stale, never alerted). Exactly-midnight UTC values are date-only: `posted_at` stays
+  None and freshness comes from first-seen. Alerts show the listing time "via SimplifyJobs".
 - The body and ETag are cached in `logs/simplify_cache.json` / `.etag`; the fetch is conditional
   (`If-None-Match`, 304 reuses the cache). A failed fetch raises; stale data is never served silently.
 

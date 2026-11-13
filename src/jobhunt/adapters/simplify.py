@@ -100,6 +100,10 @@ class SimplifyAdapter(Adapter):
             posted = datetime.fromtimestamp(ts, timezone.utc)
             if posted < cutoff:
                 continue
+            # date_posted is when Simplify listed the row, to the second. Exactly midnight
+            # UTC means a date-only entry: keep it undated (freshness from first-seen).
+            # Otherwise it is a real timestamp, so the normal freshness window applies.
+            exact = posted if (posted.hour, posted.minute, posted.second) != (0, 0, 0) else None
             locs = row.get("locations") or []
             raw_terms = row.get("terms")
             terms = [str(t) for t in raw_terms if t] if isinstance(raw_terms, list) else None
@@ -111,9 +115,9 @@ class SimplifyAdapter(Adapter):
                     title=row.get("title") or "",
                     location="; ".join(locs) or None,
                     url=row.get("url") or "",
-                    posted_at=None,
+                    posted_at=exact,
                     terms=terms or None,
-                    posted_note=f"Posted {posted:%b} {posted.day} via SimplifyJobs",
+                    posted_note=None if exact else f"Posted {posted:%b} {posted.day} via SimplifyJobs",
                 )
             )
         return jobs

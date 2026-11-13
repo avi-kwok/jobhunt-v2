@@ -36,7 +36,16 @@ def test_only_allowlisted_canonical_names(tmp_path):
     jobs = run([row("a", "GOOGLE"), row("b", "Jane  Street."), row("c", "Acme")], tmp_path)
     assert sorted(j.company for j in jobs) == ["Google", "Jane Street"]
     j = next(j for j in jobs if j.company == "Google")
-    assert j.location == "Toronto, ON; Remote" and j.posted_at is None
+    assert j.location == "Toronto, ON; Remote"
+    assert j.posted_at is not None and j.posted_note is None  # exact listing time
+
+
+def test_midnight_timestamp_is_date_only(tmp_path):
+    from datetime import datetime, timezone
+    midnight = int(datetime.now(timezone.utc).replace(hour=0, minute=0, second=0,
+                                                      microsecond=0).timestamp())
+    [j] = run([row("a", "Google", date_posted=midnight)], tmp_path)
+    assert j.posted_at is None
     assert j.posted_note.startswith("Posted ") and j.posted_note.endswith("via SimplifyJobs")
 
 

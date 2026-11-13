@@ -68,7 +68,8 @@ def _posted_display(job: Job) -> str:
         if posted.tzinfo is None:  # naive timestamps are treated as UTC
             posted = posted.replace(tzinfo=timezone.utc)
         epoch = int(posted.timestamp())
-        return f"<t:{epoch}:f> (<t:{epoch}:R>)"
+        via = " via SimplifyJobs" if job.source == "simplify" else ""
+        return f"<t:{epoch}:f> (<t:{epoch}:R>){via}"
     if job.posted_note:
         return job.posted_note
     return "unknown"

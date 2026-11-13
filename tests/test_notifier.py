@@ -89,3 +89,12 @@ def test_connect_error_does_not_leak_webhook_url():
             "t", [("a", "b")], 0
         )
     assert "SUPERSECRETTOKEN" not in str(err.value)
+
+
+def test_simplify_posted_shows_via_label():
+    from datetime import datetime, timezone
+
+    from jobhunt.models import Job
+    j = Job(source="simplify", company="Tesla", external_id="1", title="SWE Intern",
+            url="https://x.example/1", posted_at=datetime(2026, 11, 13, 7, 15, tzinfo=timezone.utc))
+    assert _posted_display(j).endswith(") via SimplifyJobs")
