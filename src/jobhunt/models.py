@@ -52,6 +52,9 @@ class CompanyConfig(BaseModel):
     # ANDed into every search so only CA/US postings are paged.
     workday_search_terms: list[str] | None = None
     workday_applied_facets: dict[str, list[str]] | None = None
+    # workday: further public career sites on the same tenant/wd, fetched and unioned
+    # with `site` (e.g. RBC's rbcglobal1 beside RBCEARLYTALENT1).
+    workday_extra_sites: list[str] | None = None
     # eightfold: pin the search endpoint ("pcsx" | "legacy") instead of probing pcsx first;
     # for tenants whose pcsx endpoint is known to answer 403.
     eightfold_mode: str | None = None
@@ -72,6 +75,9 @@ class LLMTiebreakConfig(BaseModel):
     enabled: bool = True
     model: str = "claude-haiku-5-5"
     max_calls_per_scan: int = 100
+    # of those, at most this many for generic-tech-only titles ("IT Co-op"), so they can
+    # never starve the review of titles with a real software term
+    max_generic_calls_per_scan: int = 30
     daily_usd_cap: float = 0.25
 
 

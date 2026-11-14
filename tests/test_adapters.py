@@ -1,5 +1,7 @@
 """Adapter parsing against mocked ATS responses (no network)."""
 
+from pathlib import Path
+
 import httpx
 import pytest
 import respx
@@ -645,3 +647,125 @@ def test_workday_non_json_twice_still_raises(monkeypatch):
             CompanyConfig(name="Acme", ats="workday", tenant="acme", wd="wd5", site="careers"), "intern",
         )
     assert route.call_count == 2
+
+
+# ---- Workday extra sites ----------------------------------------------------
+
+
+def _wd_posting(req, path):
+    return {"title": "Software Engineer Intern", "externalPath": path,
+            "locationsText": "Toronto, ON", "bulletFields": [req], "postedOn": "Posted Today"}
+
+
+def _wd_company(**kw):
+    return CompanyConfig(name="Acme", ats="workday", tenant="acme", wd="wd5", site="careers",
+                         workday_facets=False, workday_search_terms=["intern"],
+                         workday_extra_sites=["campus"], **kw)
+
+
+_WD_CAMPUS_URL = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/campus/jobs"
+
+
+@respx.mock
+def test_workday_extra_sites_union_dedupe_and_own_urls():
+    respx.post(_WD_URL).mock(return_value=httpx.Response(200, json={"jobPostings": [
+        _wd_posting("R1", "/job/A_R1"), _wd_posting("R2", "/job/A_R2")]}))
+    respx.post(_WD_CAMPUS_URL).mock(return_value=httpx.Response(200, json={"jobPostings": [
+        _wd_posting("R2", "/job/A_R2"), _wd_posting("R3", "/job/A_R3")]}))
+    jobs = WorkdayAdapter(client=httpx.Client()).fetch(_wd_company())
+    assert [j.external_id for j in jobs] == ["R1", "R2", "R3"]
+    assert jobs[0].url == "https://acme.wd5.myworkdayjobs.com/careers/job/A_R1"
+    assert jobs[2].url == "https://acme.wd5.myworkdayjobs.com/campus/job/A_R3"
+
+
+@respx.mock
+def test_workday_failing_extra_site_keeps_primary_jobs():
+    respx.post(_WD_URL).mock(return_value=httpx.Response(200, json={"jobPostings": [
+        _wd_posting("R1", "/job/A_R1")]}))
+    respx.post(_WD_CAMPUS_URL).mock(return_value=httpx.Response(404))
+    jobs = WorkdayAdapter(client=httpx.Client()).fetch(_wd_company())
+    assert [j.external_id for j in jobs] == ["R1"]
+
+
+@respx.mock
+def test_workday_failing_primary_fails_company():
+    # the primary (student) board failing must surface as a company error,
+    # even when an extra site still answers
+    respx.post(_WD_URL).mock(return_value=httpx.Response(404))
+    respx.post(_WD_CAMPUS_URL).mock(return_value=httpx.Response(200, json={"jobPostings": [
+        _wd_posting("R3", "/job/A_R3")]}))
+    with pytest.raises(httpx.HTTPStatusError):
+        WorkdayAdapter(client=httpx.Client()).fetch(_wd_company())
+
+
+@respx.mock
+def test_workday_origin_down_falls_back_to_myworkdaysite():
+    respx.post(_WD_URL).mock(return_value=httpx.Response(521))
+    respx.post(_WD_CAMPUS_URL).mock(return_value=httpx.Response(521))
+    respx.post("https://wd5.myworkdaysite.com/wday/cxs/acme/careers/jobs").mock(
+        return_value=httpx.Response(200, json={"jobPostings": [_wd_posting("R1", "/job/A_R1")]}))
+    respx.post("https://wd5.myworkdaysite.com/wday/cxs/acme/campus/jobs").mock(
+        return_value=httpx.Response(200, json={"jobPostings": [_wd_posting("R2", "/job/A_R2")]}))
+    jobs = WorkdayAdapter(client=httpx.Client()).fetch(_wd_company())
+    assert [j.external_id for j in jobs] == ["R1", "R2"]
+    assert jobs[0].url == "https://wd5.myworkdaysite.com/recruiting/acme/careers/job/A_R1"
+
+
+@respx.mock
+def test_workday_slow_fallback_hits_budget_and_fails_company(monkeypatch):
+    from jobhunt.adapters import workday as workday_mod
+    monkeypatch.setattr(workday_mod, "ALT_BUDGET_SECONDS", -1.0)  # already over budget
+    respx.post(_WD_URL).mock(return_value=httpx.Response(521))
+    respx.post(_WD_CAMPUS_URL).mock(return_value=httpx.Response(521))
+    alt = respx.post(url__startswith="https://wd5.myworkdaysite.com/").mock(
+        return_value=httpx.Response(200, json={"jobPostings": []}))
+    adapter = WorkdayAdapter(client=httpx.Client())
+    with pytest.raises(workday_mod.FallbackBudgetExceeded):
+        adapter.fetch(_wd_company())
+    assert alt.call_count == 0 and adapter._budget_end is None
+
+
+def test_workday_detail_url_both_domains():
+    from jobhunt.adapters.workday import detail_url
+    assert detail_url("https://wd1.myworkdaysite.com/recruiting/3m/Search/job/X_R1") == (
+        "https://wd1.myworkdaysite.com/wday/cxs/3m/Search/job/X_R1")
+    assert detail_url("https://3m.wd1.myworkdayjobs.com/Search/job/X_R1") == (
+        "https://3m.wd1.myworkdayjobs.com/wday/cxs/3m/Search/job/X_R1")
+
+
+@respx.mock
+def test_workday_raises_when_all_sites_fail():
+    respx.post(_WD_URL).mock(return_value=httpx.Response(500))
+    respx.post(_WD_CAMPUS_URL).mock(return_value=httpx.Response(404))
+    with pytest.raises(httpx.HTTPStatusError):
+        WorkdayAdapter(client=httpx.Client()).fetch(_wd_company())
+
+
+def test_workday_extra_sites_429_retries_all_sites_sequentially(monkeypatch):
+    from jobhunt.adapters import workday as workday_mod
+    monkeypatch.setattr(workday_mod.time, "sleep", lambda *a, **k: None)
+    seen = []
+    workers_used = []
+
+    def fake_fetch_board(self, url, job_base, company, workers):
+        workers_used.append(workers)
+        seen.append(url)
+        if workers > 1 and "campus" in url:
+            req = httpx.Request("POST", url)
+            raise httpx.HTTPStatusError("429", request=req, response=httpx.Response(429, request=req))
+        return [Job(source="workday", company="Acme", external_id=url[-12:], title="t",
+                    url=job_base, location="Toronto, ON")]
+
+    monkeypatch.setattr(WorkdayAdapter, "_fetch_board", fake_fetch_board)
+    jobs = WorkdayAdapter(client=httpx.Client()).fetch(_wd_company())
+    assert len(jobs) == 2 and workers_used[-2:] == [1, 1]
+
+
+def test_workday_extra_sites_loaded_from_resolved_yaml(tmp_path):
+    p = tmp_path / "r.yaml"
+    p.write_text("companies:\n- name: Acme\n  ats: workday\n  tenant: acme\n  wd: wd5\n"
+                 "  site: careers\n  workday_extra_sites: [campus]\n  priority: 1\n")
+    from jobhunt.config import load_config as _lc
+    cfg = _lc(Path(__file__).resolve().parents[1] / "config.yaml", resolved_path=p)
+    acme = [c for c in cfg.companies if c.name == "Acme"]
+    assert acme and acme[0].workday_extra_sites == ["campus"]

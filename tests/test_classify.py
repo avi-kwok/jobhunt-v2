@@ -20,8 +20,8 @@ def cls(title, location=None, description=None, company="X"):
 
 
 def test_rules_version():
-    assert RULES_VERSION == 3
-    assert cls("Software Engineer Intern").rules_version == 3
+    assert RULES_VERSION == 4
+    assert cls("Software Engineer Intern").rules_version == 4
 
 
 @pytest.mark.parametrize(
@@ -435,3 +435,10 @@ def test_curly_apostrophe_masters_excluded():
                   url="https://x.example", location="Toronto, ON")
         c = classify(job, cfg.criteria, cfg.location_tiers)
         assert not c.eligible and "master" in (c.reject_reason or "")
+
+
+@pytest.mark.parametrize("title", [
+    "Cyber Security Intern", "Cyber-Security Co-op Student", "Cybersecurity Intern",
+])
+def test_cyber_security_spellings(title):
+    assert cls(title, "Toronto, ON").eligible

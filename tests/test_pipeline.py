@@ -23,6 +23,8 @@ T0 = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
 
 
 def _job(i, title=None, company="Acme", location="Toronto, ON", **kw):
+    # Dated "just posted", so a board's first scan (pipeline FIRST_SCAN_REASON) lets it through.
+    kw.setdefault("posted_at", T0)
     return Job(source="fake", company=company, external_id=str(i),
                title=title or f"Software Engineer Intern {i}",
                url=f"https://jobs.example/{i}", location=location, **kw)
@@ -356,3 +358,68 @@ def test_ingest_bulk_bounded_round_trips_and_same_results(cfg, conn):
     spy.n.update(execute=0, executemany=0, commit=0)
     assert pipeline.ingest(cfg, conn, [], cfg.companies, now=T0) == []
     assert spy.n["executemany"] == 0 and spy.total <= 10, spy.n
+
+
+# ---- first scan of a newly tracked board -------------------------------------------
+
+def _ingest_ids(cfg, conn, now):
+    return sorted(j.external_id for j in pipeline.ingest(cfg, conn, [], cfg.companies, now=now))
+
+
+def _reason(conn, job):
+    row = conn.execute("SELECT reject_reason FROM posting_tags WHERE uid = ?", (job.uid,)).fetchone()
+    return row[0] if row else None
+
+
+def _wd(i, site="careers", note="Posted 30+ Days Ago"):
+    return Job(source="workday", company="Acme", external_id=f"R{i}", title=f"Software Intern {i}",
+               url=f"https://acme.wd5.myworkdayjobs.com/{site}/job/Toronto/X_R{i}",
+               location="Toronto, ON", posted_note=note)
+
+
+def test_new_board_backlog_is_stored_silently_then_new_postings_alert(cfg, conn):
+    old = _job(1, posted_at=None)
+    FakeAdapter.JOBS = [old]
+    assert _ingest_ids(cfg, conn, T0) == []
+    assert _reason(conn, old) == pipeline.FIRST_SCAN_REASON
+    FakeAdapter.JOBS = [old, _job(2, posted_at=None)]  # undated, but the board is known now
+    assert _ingest_ids(cfg, conn, T0 + timedelta(minutes=30)) == ["2"]
+
+
+def test_known_board_undated_backlog_still_alerts(cfg, conn):
+    """A board that was down (e.g. a Workday outage) delivers what it missed on recovery."""
+    FakeAdapter.JOBS = [_job(1, posted_at=None)]
+    pipeline.ingest(cfg, conn, [], cfg.companies, now=T0 - timedelta(days=3))
+    FakeAdapter.JOBS = [_job(i, posted_at=None) for i in (1, 2, 3)]
+    assert _ingest_ids(cfg, conn, T0) == ["2", "3"]
+
+
+def test_new_board_lets_through_only_provably_recent(cfg, conn):
+    FakeAdapter.JOBS = [
+        _job(1, posted_at=T0 - timedelta(hours=2)),                       # dated, recent
+        _job(2, posted_at=None),                                          # undated
+        Job(source="greenhouse", company="Acme", external_id="3", title="Software Intern",
+            url="https://x/3", location="Toronto, ON", posted_at=T0),    # edit time only
+    ]
+    assert _ingest_ids(cfg, conn, T0) == ["1"]
+
+
+def test_new_workday_board_trusts_posted_today_only(cfg, conn):
+    FakeAdapter.JOBS = [_wd(1, note="Posted Today"), _wd(2, note="Posted Yesterday"), _wd(3)]
+    assert _ingest_ids(cfg, conn, T0) == ["R1"]
+
+
+def test_new_workday_site_on_known_company_is_gated_separately(cfg, conn):
+    FakeAdapter.JOBS = [_wd(1)]
+    pipeline.ingest(cfg, conn, [], cfg.companies, now=T0 - timedelta(days=3))
+    FakeAdapter.JOBS = [_wd(1), _wd(2), _wd(3, site="Campus_Site"), _wd(4, site="Campus_Site", note="Posted Today")]
+    assert _ingest_ids(cfg, conn, T0) == ["R2", "R4"]
+
+
+def test_known_workday_site_matches_across_domains(cfg, conn):
+    FakeAdapter.JOBS = [_wd(1)]
+    pipeline.ingest(cfg, conn, [], cfg.companies, now=T0 - timedelta(days=3))
+    alt = _wd(2)
+    alt.url = "https://wd5.myworkdaysite.com/recruiting/acme/careers/job/Toronto/X_R2"
+    FakeAdapter.JOBS = [alt]
+    assert _ingest_ids(cfg, conn, T0) == ["R2"]

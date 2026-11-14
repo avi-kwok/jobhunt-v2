@@ -413,3 +413,134 @@ def test_review_prompt_truncates_description(cfg):
     prompt = client.calls[0]["messages"][0]["content"]
     assert "Acme" in prompt and "Toronto, ON" in prompt
     assert len(prompt) < llm_tiebreak.SNIPPET_CHARS + 400
+
+
+# ---- generic tech-program titles -----------------------------------------------
+
+GENERIC_TITLES = [
+    "Co-op Student - IT",
+    "IT Co-op Student (Winter 2027)",
+    "Technology Internship Program - Summer 2027",
+    "2027 Intern Program, Technology Innovation",
+    "Digital Technology Co-op Student",
+    "Summer Student - Technology",
+    "Technical Analyst Intern",
+]
+
+
+@pytest.mark.parametrize("title", GENERIC_TITLES)
+def test_generic_title_rejected_without_llm(cfg, title):
+    c = classify(job(title), cfg.criteria, cfg.location_tiers)
+    assert not c.eligible and c.reject_reason == "no swe-category term in title"
+
+
+@pytest.mark.parametrize("title", GENERIC_TITLES)
+def test_generic_title_accepted_only_on_llm_yes(cfg, title):
+    client = FakeClient(review_resp(terms=["Summer 2027"]))
+    tb = make_tb(client)
+    c = classify(job(title), cfg.criteria, cfg.location_tiers, tb)
+    assert c.eligible and c.categories == ["swe", "llm"] and c.reject_reason is None
+    assert len(client.calls) == 1 and tb.generic_calls == 1
+    assert "no explicit software term" in client.calls[0]["system"]
+    assert "Summer 2027" in c.terms
+
+
+def test_generic_title_llm_no_rejects(cfg):
+    c = classify(job("Technical Analyst Intern"), cfg.criteria, cfg.location_tiers,
+                 make_tb(FakeClient(review_resp(software=False, reason="business analysis"))))
+    assert not c.eligible and c.reject_reason == "llm: business analysis"
+    assert c.categories == ["llm"]
+
+
+def test_generic_title_not_open_to_undergrads_rejects(cfg):
+    c = classify(job("IT Co-op Student"), cfg.criteria, cfg.location_tiers,
+                 make_tb(FakeClient(review_resp(undergrad=False, reason="MBA only"))))
+    assert not c.eligible and c.reject_reason.startswith("llm: not open to undergrads")
+
+
+@pytest.mark.parametrize("result", [RuntimeError("boom"), resp(stop="refusal"), resp(text="not json")])
+def test_generic_title_rejected_when_llm_errors(cfg, result):
+    tb = make_tb(FakeClient(result))
+    c = classify(job("IT Co-op Student"), cfg.criteria, cfg.location_tiers, tb)
+    assert not c.eligible and c.reject_reason == "no swe-category term in title"
+    assert tb.calls == 1 and tb.fallbacks == 1
+
+
+def test_generic_title_rejected_when_capped(cfg):
+    client = FakeClient(review_resp())
+    tb = make_tb(client, max_calls_per_scan=1)
+    a = classify(job("IT Co-op Student", i=1), cfg.criteria, cfg.location_tiers, tb)
+    b = classify(job("IT Co-op Student", i=2), cfg.criteria, cfg.location_tiers, tb)
+    assert a.eligible and not b.eligible and tb.capped == 1 and len(client.calls) == 1
+
+
+def test_generic_title_rejected_when_daily_cap_spent(cfg, tmp_path):
+    path = tmp_path / "usage.json"
+    llm_tiebreak._add_usage(path, 10_000_000, 10_000_000)
+    client = FakeClient(review_resp())
+    tb = llm_tiebreak.TieBreaker(LLMTiebreakConfig(), client, usage_path=path)
+    c = classify(job("IT Co-op Student"), cfg.criteria, cfg.location_tiers, tb)
+    assert not c.eligible and client.calls == []
+
+
+@pytest.mark.parametrize("title", [
+    "Data Analyst Co-op - Technology", "Digital Marketing Intern", "Technology Sales Intern",
+    "Data Science Intern, Technology", "Business Analyst Co-op (Technology)",
+    "Financial Analyst Intern - Technology", "QA Co-op Student - IT", "Quality Assurance Intern, Technology",
+    "Test Analyst Intern - Technology", "Product Manager Intern - Technology",
+    "HR Co-op Student - Technology", "Human Resources Intern - Technology",
+])
+def test_generic_prereject_makes_no_call(cfg, title):
+    client = FakeClient()
+    c = classify(job(title), cfg.criteria, cfg.location_tiers, make_tb(client))
+    assert not c.eligible and client.calls == []
+
+
+@pytest.mark.parametrize("title,kw", [
+    ("Technology Intern", {"location": "Berlin, Germany"}),
+    ("Technology Intern", {"description": "Requires 5+ years of experience."}),
+    ("Senior Technology Intern", {}),
+    ("Technology Analyst", {}),                      # no intern term
+    ("Student Ambassador", {}),                      # no tech word
+    ("It Intern", {}),                               # lowercase "it" is not IT
+])
+def test_generic_other_gates_block_the_call(cfg, title, kw):
+    client = FakeClient()
+    c = classify(job(title, **kw), cfg.criteria, cfg.location_tiers, make_tb(client))
+    assert not c.eligible and client.calls == []
+
+
+def test_generic_term_next_to_a_role_term_is_not_a_generic_call(cfg):
+    client = FakeClient(review_resp())
+    tb = make_tb(client)
+    classify(job("Technology Software Engineer Intern"), cfg.criteria, cfg.location_tiers, tb)
+    assert tb.generic_calls == 0 and tb.calls == 1
+    assert "no explicit software term" not in client.calls[0]["system"]
+
+
+
+
+def test_generic_calls_have_own_subcap():
+    tb = make_tb(FakeClient(), max_calls_per_scan=10, max_generic_calls_per_scan=2)
+    j = job("IT Co-op Student")
+    assert [tb(j, generic=True) is not None for _ in range(3)] == [True, True, False]
+    assert tb(job("Software Engineer Intern")) is not None  # strong titles still reviewed
+    assert tb.generic_calls == 2 and tb.capped == 1
+
+
+def test_generic_call_uses_described_text():
+    client = FakeClient()
+    tb = llm_tiebreak.TieBreaker(LLMTiebreakConfig(), client, describe=lambda j: "Build Java services")
+    tb(job("IT Co-op Student"), generic=True)
+    tb(job("Software Engineer Intern"))  # non-generic: describe not used
+    assert "Build Java services" in client.calls[0]["messages"][0]["content"]
+    assert "Build Java services" not in client.calls[1]["messages"][0]["content"]
+
+
+def test_prereject_support_writer_recruiter_make_no_call(cfg):
+    client = FakeClient()
+    for t in ("Technical Writer Intern", "IT Support Co-op", "Technology Recruiter Intern",
+              "Technology Risk Intern", "IT Audit Co-op", "Help Desk Technology Co-op"):
+        c = classify(job(t), cfg.criteria, cfg.location_tiers, make_tb(client))
+        assert not c.eligible, t
+    assert client.calls == []

@@ -11,7 +11,7 @@ from __future__ import annotations
 import random
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from . import crypto, db, scheduler, webhooks
@@ -27,6 +27,11 @@ from .security import redact
 
 MAX_ALERTS_PER_SUBSCRIBER_PER_CYCLE = 30
 STALE_REASON = "stale (older than freshness window at ingest)"
+FIRST_SCAN_REASON = "first scan of a newly tracked board (posting age unknown or over 24h)"
+FIRST_SCAN_MAX_AGE = timedelta(hours=24)
+# Sources whose posted_at is a last-edit or republish time, not when the role went up: an
+# old role edited today looks new, so a board's first scan never trusts them.
+_EDIT_TIME_SOURCES = frozenset({"greenhouse", "digitalrecruiters"})
 
 
 # ---- fetch helpers (moved from cli) ---------------------------------------
@@ -120,15 +125,21 @@ def ingest(
         db.touch_postings(conn, [j.uid for j in jobs], now=now)
         stale: list[tuple[str, Classification]] = []
         fresh: list[Job] = []
-        for job in db.insert_new_postings(conn, jobs, seen_at=db.to_iso(now)):
-            if is_fresh(job, cfg.criteria.freshness_minutes, now=now):
-                fresh.append(job)
+        seen_at = db.to_iso(now)
+        new_jobs = db.insert_new_postings(conn, jobs, seen_at=seen_at)
+        new_board = _new_boards(conn, new_jobs, seen_at)
+        for job in new_jobs:
+            if not is_fresh(job, cfg.criteria.freshness_minutes, now=now):
+                reason = STALE_REASON
+            elif _board_key(job) in new_board and not _surely_recent(job, now):
+                reason = FIRST_SCAN_REASON
             else:
-                stale.append((
-                    job.uid,
-                    Classification(eligible=False, reject_reason=STALE_REASON,
-                                   rules_version=RULES_VERSION),
-                ))
+                fresh.append(job)
+                continue
+            stale.append((
+                job.uid,
+                Classification(eligible=False, reject_reason=reason, rules_version=RULES_VERSION),
+            ))
         db.upsert_tags_many(conn, stale)
         fresh_by_idx[out.idx] = fresh
     report.ingest_seconds = time.monotonic() - t0
@@ -145,6 +156,31 @@ def ingest(
             "company(ies) not scanned, deferred to the next scan"
         )
     return [j for idx in sorted(fresh_by_idx) for j in fresh_by_idx[idx]]
+
+
+def _board_key(job: Job) -> tuple[str, str, str | None]:
+    site = workday.site_of(job.url) if job.source == "workday" else None
+    return (job.source, job.company, site)
+
+
+def _new_boards(conn: db.Conn, new_jobs: list[Job], seen_at: str) -> set[tuple]:
+    """Boards (see db.board_known) of these new postings that had no posting before this scan.
+
+    A newly added company, or a newly added Workday site, lists every role it already has
+    open on its first scan. Those must not alert as if just posted (Workday gives no
+    posting date, so the freshness window cannot catch them)."""
+    keys = {_board_key(j) for j in new_jobs}
+    return {k for k in keys if not db.board_known(conn, k[0], k[1], seen_at, site=k[2])}
+
+
+def _surely_recent(job: Job, now: datetime) -> bool:
+    """True only when the posting is provably under FIRST_SCAN_MAX_AGE old."""
+    if job.source == "workday":
+        return (job.posted_note or "").strip().lower() == "posted today"
+    if job.posted_at is None or job.source in _EDIT_TIME_SOURCES:
+        return False
+    posted = job.posted_at if job.posted_at.tzinfo else job.posted_at.replace(tzinfo=timezone.utc)
+    return now - posted <= FIRST_SCAN_MAX_AGE
 
 
 # ---- stage 2: classify ----------------------------------------------------

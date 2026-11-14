@@ -17,6 +17,35 @@ operations: `docs/RUNBOOK.md`. History: `docs/v2-phase0.md`.
    one Haiku review call per rule-eligible (or ambiguous-title) posting (`llm_tiebreak.py`): it can
    reject non-software or grad-only roles and adds term tags. It never changes country detection;
    on any failure or cap the rules decide.
+   Generic-tech-only titles ("IT Co-op Student", "Technology Internship Program", "Technical
+   Analyst Intern": the only role signal is IT / technology / tech / digital / technical /
+   computer) that pass every other gate also go to Haiku, except titles naming data
+   analyst/science, business/financial analyst, QA, test analyst, PM, HR, marketing, sales,
+   writer, support/help desk, recruiting, risk, audit, legal or compliance (rejected with no
+   call). Here only a Haiku accept makes the posting eligible; with no key, a cap or an API
+   error it stays rejected. For Workday postings the description is fetched from the job
+   detail endpoint first (the list API has none). Generic calls have their own per-scan cap
+   (`max_generic_calls_per_scan`, 30) inside `max_calls_per_scan`, so they cannot starve the
+   review of titles with a real software term. Only NEW postings are classified (no
+   re-classification on a `RULES_VERSION` bump), so expect about 1-2 extra calls per scan; the
+   daily USD cap still bounds spend.
+   Workday companies may list `workday_extra_sites` (same tenant/wd, e.g. RBC `rbcglobal1`,
+   Sun Life/BMO `Campus`, CIBC `search`, Manulife `MFCJH_adminJobs`): each site is fetched with
+   its own query plan and job URLs and results are unioned by uid. A failing extra site is
+   skipped; a failing primary site fails the company (so the scan reports it). A 429 still
+   triggers the sequential retry. When a `myworkdayjobs.com` pod answers a Cloudflare origin
+   error (520-530) the adapter retries the site on Workday's alternate domain
+   `{wd}.myworkdaysite.com` (same cxs API; job links become `/recruiting/{tenant}/{site}/job/...`).
+   That fallback is capped at `ALT_BUDGET_SECONDS` (240 s) per site, because the alternate domain
+   can be slow (16-22 s per request in the Nov 2026 wd1/wd5 outage). Uids do not depend on the
+   domain, so switching back and forth never re-alerts.
+   **First scan of a new board.** A board is (source, company), plus the career site for Workday.
+   When a board has no posting first seen before this scan (a newly added company or Workday
+   site), its new postings are stored silently (`FIRST_SCAN_REASON`) unless they are provably
+   under 24 h old: Workday "Posted Today", or a dated source whose `posted_at` is a creation or
+   publish time (not Greenhouse `updated_at` or DigitalRecruiters `republished_at`). Without
+   this, Workday's undated postings would all alert as new. Boards that were already tracked are
+   unaffected, so postings missed while a board was down still alert when it recovers.
 3. `match_subscribers` - per active subscriber: eligible postings first seen at/after activation
    whose level is in `levels` and country in `countries`. Opaque locations ("Multiple Locations")
    and country-less remote roles pass. Best first: location tier, then company priority.

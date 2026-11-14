@@ -336,6 +336,24 @@ def update_location(conn: Conn, uid: str, location: str) -> None:
     conn.commit()
 
 
+def board_known(
+    conn: Conn, source: str, company: str, before: str, site: str | None = None
+) -> bool:
+    """Whether any posting from this board was first seen before `before` (an ISO time).
+
+    A board is (source, company), plus the career `site` for Workday companies with
+    several sites. Used to spot a board's first scan; rows inserted in the current scan
+    carry first_seen_at == `before`, so they never count.
+    """
+    sql = "SELECT 1 FROM postings WHERE source = ? AND company = ? AND first_seen_at < ?"
+    args: list = [source, company, before]
+    if site:
+        esc = site.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        sql += " AND (url LIKE ? ESCAPE '\\' OR url LIKE ? ESCAPE '\\')"
+        args += [f"%.myworkdayjobs.com/{esc}/job/%", f"%.myworkdaysite.com/recruiting/%/{esc}/job/%"]
+    return conn.execute(sql + " LIMIT 1", args).fetchone() is not None
+
+
 def touch_postings(conn: Conn, uids: list[str], now: datetime | None = None) -> None:
     """Mark postings still on the board (at most one write per posting per day)."""
     now = now or datetime.now(timezone.utc)

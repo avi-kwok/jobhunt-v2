@@ -27,6 +27,9 @@ board; we narrow server-side first, two ways:
    downstream requires a role term AND an internship term, these queries form a
    superset of anything that could pass the filter.
 
+Companies with ``workday_extra_sites`` repeat all of the above for each extra site on
+the same tenant/wd (job URLs built from that site) and union the results by uid.
+
 Either way results are deduped by uid, a persistent 429 triggers a cooldown and
 a sequential retry, and ``MAX_PAGES`` caps every individual search.
 """
@@ -41,13 +44,27 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from ..models import CompanyConfig, Job
-from .base import Adapter, make_client, register, request_with_retry
+from .base import Adapter, html_to_text, make_client, register, request_with_retry
 
 JOBS_URL = "https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs"
 JOB_BASE = "https://{tenant}.{wd}.myworkdayjobs.com/{site}"
+# Workday's alternate career-site domain. Same tenants and cxs API; used when a
+# myworkdayjobs.com pod answers a Cloudflare origin error (520-530), which has taken
+# whole pods (wd1, wd5) offline for every client while myworkdaysite.com kept serving.
+ALT_JOBS_URL = "https://{wd}.myworkdaysite.com/wday/cxs/{tenant}/{site}/jobs"
+ALT_JOB_BASE = "https://{wd}.myworkdaysite.com/recruiting/{tenant}/{site}"
+_ORIGIN_DOWN = range(520, 531)
+# Wall-clock cap on one site's myworkdaysite.com fallback. During the wd1/wd5 outage that
+# domain answered in 16-22 s per request (sometimes 504 CALYPSO_TIMEOUT), so one big board
+# ran 10-14 minutes; the cap fails it fast instead of stalling the scan's fetch workers.
+ALT_BUDGET_SECONDS = 240.0
 # A public job URL (JOB_BASE + externalPath) -> its JSON detail endpoint.
 _JOB_URL_RE = re.compile(
     r"^https://(?P<tenant>[A-Za-z0-9-]+)\.(?P<wd>wd\d+)\.myworkdayjobs\.com"
+    r"/(?P<site>[^/?#]+)(?P<path>/job/[^?#]+)$"
+)
+_ALT_JOB_URL_RE = re.compile(
+    r"^https://(?P<wd>wd\d+)\.myworkdaysite\.com/recruiting/(?P<tenant>[A-Za-z0-9-]+)"
     r"/(?P<site>[^/?#]+)(?P<path>/job/[^?#]+)$"
 )
 
@@ -134,9 +151,14 @@ def find_intern_facets(facets: list[dict] | None) -> dict[str, list[str]]:
     return found
 
 
+class FallbackBudgetExceeded(httpx.TimeoutException):
+    """The myworkdaysite.com fallback for one site ran past ALT_BUDGET_SECONDS."""
+
+
 @register
 class WorkdayAdapter(Adapter):
     ats = "workday"
+    _budget_end: float | None = None  # monotonic deadline while a fallback site is fetched
 
     def fetch(self, company: CompanyConfig) -> list[Job]:
         missing = [f for f in ("tenant", "wd", "site") if not getattr(company, f)]
@@ -145,13 +167,13 @@ class WorkdayAdapter(Adapter):
                 f"{company.name}: workday adapter needs {', '.join(missing)}"
             )
 
-        url = JOBS_URL.format(tenant=company.tenant, wd=company.wd, site=company.site)
-        job_base = JOB_BASE.format(
-            tenant=company.tenant, wd=company.wd, site=company.site
-        )
+        sites = [company.site]
+        for extra in company.workday_extra_sites or []:
+            if extra and extra not in sites:
+                sites.append(extra)
 
         try:
-            return self._fetch_board(url, job_base, company, workers=SEARCH_CONCURRENCY)
+            return self._fetch_sites(company, sites, workers=SEARCH_CONCURRENCY)
         except httpx.HTTPStatusError as exc:
             if exc.response is None or exc.response.status_code != 429:
                 raise
@@ -162,7 +184,65 @@ class WorkdayAdapter(Adapter):
                 f"[workday] {company.name}: rate-limited, retrying sequentially",
                 file=sys.stderr,
             )
-            return self._fetch_board(url, job_base, company, workers=1)
+            return self._fetch_sites(company, sites, workers=1)
+
+    def _fetch_sites(self, company: CompanyConfig, sites: list[str], workers: int) -> list[Job]:
+        """Fetch the primary site plus each extra site of the tenant; union deduped by uid.
+
+        A failing extra site is logged and skipped so it never costs the primary site's
+        jobs; the error is raised only when every site failed. A 429 always propagates so
+        fetch() can retry all sites sequentially.
+        """
+        seen: set[str] = set()
+        jobs: list[Job] = []
+        errors: list[Exception] = []
+        primary_error: Exception | None = None
+        for i, site in enumerate(sites):
+            try:
+                site_jobs = self._fetch_site(company, site, workers)
+            except (httpx.HTTPError, ValueError) as exc:
+                if i == 0:
+                    primary_error = exc
+                resp = getattr(exc, "response", None)
+                if resp is not None and resp.status_code == 429:
+                    raise  # rate limit: fetch() cools off and retries every site sequentially
+                errors.append(exc)
+                if len(sites) > 1:
+                    print(
+                        f"[workday] {company.name}: site {site} failed ({type(exc).__name__})",
+                        file=sys.stderr,
+                    )
+                continue
+            for job in site_jobs:
+                if job.uid not in seen:
+                    seen.add(job.uid)
+                    jobs.append(job)
+        if primary_error is not None:
+            # The primary site is the main student board: never hide its failure behind
+            # extra sites that still work, so the scan reports the company as errored.
+            raise primary_error
+        return jobs
+
+    def _fetch_site(self, company: CompanyConfig, site: str, workers: int) -> list[Job]:
+        """One site on myworkdayjobs.com, falling back to myworkdaysite.com on 520-530."""
+        fmt = dict(tenant=company.tenant, wd=company.wd, site=site)
+        try:
+            return self._fetch_board(JOBS_URL.format(**fmt), JOB_BASE.format(**fmt), company, workers)
+        except httpx.HTTPStatusError as exc:
+            if exc.response is None or exc.response.status_code not in _ORIGIN_DOWN:
+                raise
+            print(
+                f"[workday] {company.name}: {company.tenant}.{company.wd}.myworkdayjobs.com returned "
+                f"{exc.response.status_code}, using {company.wd}.myworkdaysite.com",
+                file=sys.stderr,
+            )
+            self._budget_end = time.monotonic() + ALT_BUDGET_SECONDS
+            try:
+                return self._fetch_board(
+                    ALT_JOBS_URL.format(**fmt), ALT_JOB_BASE.format(**fmt), company, workers
+                )
+            finally:
+                self._budget_end = None
 
     def plan_queries(self, url: str, company: CompanyConfig) -> list[Query]:
         """Decide which searches to run for this board.
@@ -192,6 +272,10 @@ class WorkdayAdapter(Adapter):
         transient, so one short retry recovers it instead of losing the company for a scan.
         """
         for attempt in range(1 + _NON_JSON_RETRIES):
+            if self._budget_end is not None and time.monotonic() > self._budget_end:
+                raise FallbackBudgetExceeded(
+                    f"myworkdaysite.com fallback exceeded {ALT_BUDGET_SECONDS:.0f}s"
+                )
             resp = request_with_retry(self.client, "POST", url, json=body, headers=_HEADERS)
             resp.raise_for_status()
             try:
@@ -307,9 +391,20 @@ class WorkdayAdapter(Adapter):
         )
 
 
+def site_of(job_url: str | None) -> str | None:
+    """The career site a Workday job URL belongs to (either domain), or None."""
+    u = (job_url or "").strip()
+    m = _ALT_JOB_URL_RE.match(u) or _JOB_URL_RE.match(u)
+    return m["site"] if m else None
+
+
 def detail_url(job_url: str | None) -> str | None:
     """The cxs JSON detail endpoint for a Workday job URL, or None if it isn't one."""
-    m = _JOB_URL_RE.match((job_url or "").strip())
+    u = (job_url or "").strip()
+    alt = _ALT_JOB_URL_RE.match(u)
+    if alt:
+        return f"https://{alt['wd']}.myworkdaysite.com/wday/cxs/{alt['tenant']}/{alt['site']}{alt['path']}"
+    m = _JOB_URL_RE.match(u)
     if not m:
         return None
     return (
@@ -342,3 +437,25 @@ def resolve_locations(job_url: str | None, client: httpx.Client | None = None) -
     locs = [info.get("location"), *(info.get("additionalLocations") or [])]
     locs = [str(x).strip() for x in locs if isinstance(x, str) and x.strip()]
     return "; ".join(dict.fromkeys(locs)) or None
+
+
+def fetch_description(job_url: str | None, client: httpx.Client | None = None) -> str | None:
+    """Plain-text job description from the detail endpoint (the list API has none).
+
+    Used only for generic-tech titles before the LLM review. None on any failure.
+    """
+    url = detail_url(job_url)
+    if url is None:
+        return None
+    own = client is None
+    client = client or make_client()
+    try:
+        resp = request_with_retry(client, "GET", url, headers=_HEADERS)
+        resp.raise_for_status()
+        info = resp.json().get("jobPostingInfo") or {}
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+    finally:
+        if own:
+            client.close()
+    return html_to_text(info.get("jobDescription")) if isinstance(info, dict) else None

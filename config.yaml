@@ -98,6 +98,7 @@ criteria:
     - ml engineer
     - machine learning
     - cybersecurity
+    - cyber security     # also matches cyber-security (classify.py EXTRA_SWE_TERMS)
     - cyber engineer
     # Quebec French titles (Bombardier, Beenox, ...)
     - développement logiciel
@@ -142,7 +143,8 @@ criteria:
      John Deere, 3M, Siemens, General Motors, Ford, Lucid Motors, SpaceX, Anduril,
      Accenture, Applied Materials, Lam Research, Micron, Marvell, Celestica,
      Hydro One, Ontario Power Generation, Pfizer, Johnson & Johnson, Moderna,
-     Seagate, Western Digital, ASML, MDA Space]
+     Seagate, Western Digital, ASML, MDA Space,
+     Magna International, L3Harris, General Dynamics Mission Systems-Canada, Thales, Airbus, Lumentum, Aptiv, StandardAero, Rockwell Automation, Generac, Symbotic, Hexagon]
 
   # FRESHNESS. Only notify on postings whose own timestamp is within this many
   # minutes. 60 comfortably covers the scan cadence (every 15-30 min) so a job
@@ -162,7 +164,8 @@ criteria:
   llm_tiebreak:
     enabled: true
     model: claude-haiku-5-5
-    max_calls_per_scan: 100
+    max_calls_per_scan: 100  # see docs/architecture.md for the generic-title estimate
+    max_generic_calls_per_scan: 30  # generic-tech-only titles ("IT Co-op"), within the 100
     daily_usd_cap: 0.25
 
 # ---------------------------------------------------------------------------
@@ -286,8 +289,11 @@ company_priorities:
 # ---------------------------------------------------------------------------
 companies:
   - name: 1Password
+  - name: 1QBit
   - name: 3M
+  - name: A Thinking Ape
   - name: Accenture
+  - name: Achievers
   - name: ACI Worldwide
   - name: Activision Blizzard
   - name: Adobe
@@ -295,24 +301,32 @@ companies:
   - name: Affirm
   - name: Afterpay
     covered_by: Block
+  - name: Air Canada
   - name: Airbnb
+  - name: Airbus
   - name: Airtable
   - name: Akamai Technologies
   - name: Akuna Capital
+  - name: AlayaCare
   - name: Algolia
+  - name: Altera
   - name: Amazon            # covers AWS / Amazon Web Services (amazon.jobs)
   - name: AMD
   - name: American Express
+  - name: Amgen
   - name: Analog Devices
   - name: Anduril
+  - name: Apera AI
   - name: Apple
   - name: Applied Intuition
   - name: Applied Materials
+  - name: Aptiv
   - name: Arctic Wolf
   - name: Arista Networks
   - name: Arm
   - name: Asana
   - name: ASML
+  - name: ATB Financial
   - name: Atlassian
   - name: Audible
     covered_by: Amazon
@@ -321,6 +335,9 @@ companies:
   - name: Avalara
   - name: Balyasny
   - name: Bank of America
+  - name: BC Pension Corporation
+  - name: BCI
+  - name: Beenox
   - name: Belvedere Trading
   - name: Blizzard
   - name: BMO               # Bank of Montreal
@@ -338,13 +355,17 @@ companies:
   - name: Bolt Financial
   - name: Bose
   - name: Box
+  - name: Brave
   - name: Braze
+  - name: Bree
   - name: Brex
   - name: Bridgewater Associates
   - name: Broadcom
   - name: Broadridge
   - name: Bugcrowd
   - name: Cadence Design Systems
+  - name: Calian
+  - name: Calix
   - name: Canva
   - name: Capital One
   - name: Carta
@@ -352,6 +373,8 @@ companies:
     covered_by: Block
   - name: Caterpillar
   - name: Cboe Global Markets
+  - name: CDPQ
+  - name: Cerebras
   - name: Character.AI
   - name: Charles Schwab
   - name: Check Point Software
@@ -363,19 +386,26 @@ companies:
   - name: Cisco
   - name: Citadel
   - name: Citadel Securities
+  - name: Citco
   - name: Citi              # Citigroup
+  - name: Clarius Mobile Health
   - name: Clio
   - name: Cloudflare
   - name: Cloudinary
+  - name: CN
   - name: Cockroach Labs
+  - name: Cogeco
   - name: Cohere
   - name: Coinbase
   - name: Comcast
   - name: Confluent
+  - name: Corpay
   - name: Coupang
+  - name: CPKC
   - name: CPP Investments
   - name: Credit Karma
     covered_by: Intuit
+  - name: Cresta
   - name: CrowdStrike
   - name: CyberArk
   - name: D. E. Shaw
@@ -383,6 +413,8 @@ companies:
   - name: Datadog
   - name: Dataminr
   - name: Dayforce
+  - name: Deep Genomics
+  - name: Definity Financial
   - name: Dell Technologies
   - name: Deloitte
   - name: Deloitte Canada
@@ -397,13 +429,18 @@ companies:
   - name: Duolingo
   - name: Dynatrace
   - name: eBay
+  - name: Eidos-Montreal
   - name: Elastic
   - name: Electronic Arts
+  - name: Enbridge
+  - name: Entrust
   - name: Epic Games
   - name: Epic Systems
   - name: Equifax
+  - name: Equitable Bank
   - name: Ericsson
   - name: Etsy
+  - name: EUNA Solutions
   - name: Expedia Group
   - name: FactSet
   - name: Faire
@@ -414,12 +451,16 @@ companies:
   - name: Fiserv
   - name: Flow Traders
   - name: Ford
+  - name: Foresters Financial
   - name: Fortinet
   - name: FreshBooks
   - name: Freshworks
   - name: Garmin
   - name: GE Aerospace
+  - name: Generac
+  - name: General Dynamics Mission Systems-Canada
   - name: General Motors
+  - name: GeoComply
   - name: Geotab
   - name: GitHub
   - name: GitLab
@@ -428,11 +469,16 @@ companies:
   - name: Global Relay
   - name: Goldman Sachs
   - name: Google            # covers Alphabet / YouTube
+  - name: GoTo
   - name: Grammarly
+  - name: Grass Valley
   - name: HackerOne
+  - name: Harris Computer
   - name: Harvey AI
   - name: HashiCorp
+  - name: Hexagon
   - name: Honeywell
+  - name: HOOPP
   - name: HPE               # Hewlett Packard Enterprise
   - name: Hootsuite
   - name: Hopper
@@ -441,9 +487,12 @@ companies:
   - name: HubSpot
   - name: Hudson River Trading
   - name: Hugging Face
+  - name: iA Financial Group
   - name: IBM
+  - name: IKO Industries
   - name: IMC Trading
   - name: Indeed
+  - name: Index Exchange
   - name: Instacart
   - name: Intact Financial
   - name: Intel
@@ -454,37 +503,51 @@ companies:
   - name: Jasper
   - name: John Deere
   - name: Johnson & Johnson
+  - name: Jonas Software
   - name: JPMorgan Chase
   - name: Jump Trading
+  - name: Kepler Communications
+  - name: Khan Academy
   - name: Kinaxis
   - name: Klarna
   - name: Klaviyo
+  - name: Konrad Group
   - name: KPMG
+  - name: L3Harris
+  - name: LabCorp
   - name: Lam Research
   - name: Later
   - name: Lightspeed Commerce
   - name: Linear
   - name: LinkedIn
   - name: LiveRamp
+  - name: Loblaw Companies
   - name: Lockheed Martin
+  - name: Loop
   - name: LSEG              # London Stock Exchange Group
   - name: Lucid Motors
   - name: Lucid Software
+  - name: Lumentum
   - name: Lyft
+  - name: Mackenzie Investments
+  - name: Magna International
   - name: Manulife
   - name: Marqeta
   - name: Marvell
   - name: Mastercard
   - name: MathWorks
+  - name: McKesson
   - name: Mercury
   - name: Meta
   - name: Micron
   - name: Microsoft
   - name: Millennium Management
+  - name: Mirego
   - name: Miro
   - name: Mistral AI
   - name: Moderna
   - name: monday.com
+  - name: Moneris
   - name: MongoDB
   - name: Moody's
   - name: Morgan Stanley
@@ -508,6 +571,7 @@ companies:
   - name: Nokia
   - name: Northrop Grumman
   - name: Notion
+  - name: Nuclear Promise X
   - name: Nuro
   - name: Nutanix
   - name: Nuvei
@@ -526,21 +590,26 @@ companies:
   - name: PayPal
   - name: Peloton
   - name: Perplexity
+  - name: Perseus Group
   - name: Pfizer
   - name: Pinterest
   - name: Plaid
+  - name: Planview
+  - name: Plooto
   - name: Point72
   - name: PointClickCare
   - name: Postman
   - name: Procore
   - name: Progressive Insurance
   - name: Proofpoint
+  - name: PSP Investments
   - name: Pure Storage
   - name: PwC
   - name: Qualcomm
   - name: Qualtrics
   - name: Questrade
   - name: Quora
+  - name: Rakuten Kobo
   - name: Ramp
   - name: Rapid7
   - name: RBC               # Royal Bank of Canada
@@ -549,14 +618,17 @@ companies:
   - name: Redfin
   - name: Remitly
   - name: Renaissance Technologies
+  - name: ResMed
   - name: Retool
   - name: Revolut
+  - name: Revvity
   - name: Riot Games
   - name: Ripple
   - name: Rippling
   - name: Rivian
   - name: Robinhood
   - name: Roblox
+  - name: Rockwell Automation
   - name: Rogers Communications
   - name: Roku
   - name: RTX
@@ -575,6 +647,7 @@ companies:
   - name: Sentry
   - name: ServiceNow
   - name: Shopify
+  - name: ShyftLabs
   - name: Siemens
   - name: Slack
     covered_by: Salesforce
@@ -583,45 +656,62 @@ companies:
   - name: Snowflake
   - name: Snyk
   - name: SoFi
+  - name: Solink
   - name: Sony
   - name: Sony Interactive Entertainment
+  - name: SOTI
   - name: SpaceX
   - name: Splunk
   - name: Spotify
   - name: Square
     covered_by: Block
   - name: StackAdapt
+  - name: StandardAero
   - name: State Street
   - name: Stripe
   - name: Sumo Logic
   - name: Sun Life
   - name: SIG               # Susquehanna International Group
+  - name: Suncor
+  - name: Symbotic
   - name: Synopsys
   - name: Tableau
     covered_by: Salesforce
   - name: TD                # TD Bank / Toronto-Dominion Bank
+  - name: TechInsights
+  - name: Telesat
   - name: TELUS
   - name: Tenable
   - name: Tenstorrent
+  - name: Terminal
   - name: Tesla
   - name: Texas Instruments
+  - name: Thales
+  - name: The Co-operators
+  - name: The Home Depot Canada
   - name: The Trade Desk
+  - name: theScore
   - name: Thomson Reuters
+  - name: Thrive Health
   - name: TikTok
   - name: TMX Group
   - name: Toast
   - name: Tower Research Capital
   - name: Trend Micro
+  - name: Trimble
   - name: Twilio
   - name: Twitch
   - name: Two Sigma
   - name: Uber
   - name: UBS
   - name: Unity
+  - name: Valsoft Corporation
   - name: Vanguard
   - name: Vanta
   - name: Veeam
+  - name: Veeva Systems
   - name: Verafin
+  - name: Veralto
   - name: Vercel
   - name: Verizon
   - name: Verkada
@@ -629,6 +719,7 @@ companies:
   - name: Visa
   - name: VMware
     covered_by: Broadcom
+  - name: Volaris Group
   - name: Walmart Global Tech
   - name: Wayfair
   - name: Waymo
@@ -640,15 +731,18 @@ companies:
   - name: Wolverine Trading
   - name: Workday
   - name: Workiva
+  - name: Workleap
   - name: xAI
   - name: Xero
   - name: Yelp
   - name: Zendesk
   - name: Zillow
+  - name: Zip
   - name: Zoom
   - name: ZoomInfo
   - name: Zoox
   - name: Zscaler
+  - name: Zymeworks
 
   # --- Canadian expansion (2026-10-19): companies with Canadian SWE intern/co-op
   # programs not already above. Grouped by region for readability.

@@ -8,6 +8,9 @@ regex work with WHOLE-WORD matching, so "Internal", "International" and
 Optional `tiebreak` (llm_tiebreak.TieBreaker): consulted ONLY when the sole role match
 is an ambiguous term and every other gate passes; its verdict replaces the rules'
 verdict and is marked with an "llm" category (plus an "llm: " reject_reason prefix).
+It is also consulted (generic=True) when the only role signal is a generic tech word
+("IT Co-op Student", "Technology Internship Program") and every other gate passes; there
+only an explicit accept makes the title eligible, so no verdict means rejected.
 
 Bump RULES_VERSION whenever the rules change so stored tags can be re-run.
 """
@@ -24,7 +27,7 @@ from .llm_tiebreak import LLM_TAG, REJECT_PREFIX, Verdict
 from .matcher import _is_remote, _is_unresolved_location
 from .models import Criteria, Job
 
-RULES_VERSION = 3
+RULES_VERSION = 4
 REJECT_MAX = 160
 
 # ---- term lists -----------------------------------------------------------
@@ -35,7 +38,28 @@ EXTRA_SWE_TERMS = [
     "ios", "android", "embedded", "firmware",
     "machine learning engineer", "ml engineer", "data engineer", "security engineer",
     "front end engineer", "frontend engineer",
+    # "cyber security" / "cyber-security" (the term regex makes separators interchangeable)
+    "cyber security",
 ]
+
+# Generic tech-program words ("IT Co-op Student", "Technology Internship Program",
+# "Digital Technology Co-op", "Technical Analyst Intern"). Not a SWE signal by
+# themselves: when one is the ONLY role signal and every other gate passes, the title
+# goes to the LLM, which must accept it (no LLM / cap / error -> rejected). "IT" is
+# matched upper-case only ("it" is a pronoun).
+_GENERIC_TECH_RE = re.compile(
+    r"\b(?:(?-i:IT)|information[\s\-]+technology|technology|tech|digital|technical|computer)\b",
+    re.IGNORECASE,
+)
+# Generic-only titles containing one of these are rejected before the LLM (no call).
+_GENERIC_PREREJECT_RE = re.compile(
+    r"\b(?:data[\s\-]+analy(?:st|sts|tics)|data[\s\-]+scien(?:ce|tist|tists)|"
+    r"business[\s\-]+analy(?:st|sts)|financial[\s\-]+analy(?:st|sts)|"
+    r"(?-i:QA)|quality[\s\-]+assurance|test[\s\-]+analy(?:st|sts)|"
+    r"product[\s\-]+managers?|(?-i:HR)|human[\s\-]+resources|marketing|sales|"
+    r"writers?|writing|support|help[\s\-]*desk|recruit\w*|risk|audit\w*|legal|compliance)\b",
+    re.IGNORECASE,
+)
 
 # Role terms that are also hardware / industrial discipline names ("Systems
 # Engineering Co-Op" at a defense prime, "Production Engineer (Starship)",
@@ -479,7 +503,7 @@ def classify(
     job: Job,
     criteria: Criteria,
     location_tiers: dict[str, list[str]],
-    tiebreak: Callable[[Job], Verdict | None] | None = None,
+    tiebreak: Callable[..., Verdict | None] | None = None,
 ) -> Classification:
     """Deterministic eligibility + tags for one posting (see module doc for `tiebreak`)."""
     rules = _rules(criteria, location_tiers)
@@ -498,6 +522,12 @@ def classify(
     ambiguous_only = not strong and bool(rules.amb_role and rules.amb_role.search(role_title))
     swe = strong or (ambiguous_only and _ambiguous_is_swe(role_title, job.company, rules))
     categories = ["swe"] if swe else []
+    generic_only = (
+        not strong
+        and not ambiguous_only
+        and bool(_GENERIC_TECH_RE.search(role_title))
+        and not _GENERIC_PREREJECT_RE.search(role_title)
+    )
 
     # exclusions run on the title with exempt phrases blanked out
     excl_title = rules.exempt.sub(" ", title) if rules.exempt else title
@@ -527,6 +557,8 @@ def classify(
     # LLM review: any title with a role match (strong or ambiguous) that passes every other
     # gate gets one call. Ambiguous-only: the verdict replaces the rules' SWE decision.
     # Otherwise it can only reject (non-software role, or not open to undergrads).
+    # Generic-tech-only titles (no role term at all) go to the LLM too, but only an
+    # explicit accept makes them eligible; any non-verdict leaves the rules' rejection.
     llm_terms: list[str] = []
     if (
         tiebreak is not None
@@ -542,6 +574,23 @@ def classify(
             if verdict.is_swe and verdict.undergrad_ok:
                 if ambiguous_only:
                     categories, reason = ["swe", LLM_TAG], None
+            else:
+                why = verdict.reason if not verdict.is_swe else f"not open to undergrads: {verdict.reason}"
+                reason = f"{REJECT_PREFIX}{why}"[:REJECT_MAX]
+                categories = (["swe"] if verdict.is_swe else []) + [LLM_TAG]
+    elif (
+        tiebreak is not None
+        and generic_only
+        and level is not None
+        and not excl_match
+        and years is None
+        and loc_ok
+    ):
+        verdict = tiebreak(job, generic=True)
+        if verdict is not None:
+            llm_terms = list(verdict.terms)
+            if verdict.is_swe and verdict.undergrad_ok:
+                categories, reason = ["swe", LLM_TAG], None
             else:
                 why = verdict.reason if not verdict.is_swe else f"not open to undergrads: {verdict.reason}"
                 reason = f"{REJECT_PREFIX}{why}"[:REJECT_MAX]

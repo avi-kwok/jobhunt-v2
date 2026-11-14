@@ -31,6 +31,7 @@ companies:
   tenant: bmo
   wd: wd3
   site: External
+  workday_extra_sites: [Campus]
   priority: 1
 - name: Block
   priority: 1
@@ -41,6 +42,7 @@ companies:
   tenant: cibc
   wd: wd3
   site: campus
+  workday_extra_sites: [search]
   priority: 1
 - name: Capital One
   priority: 1
@@ -159,6 +161,7 @@ companies:
   tenant: rbc
   wd: wd3
   site: RBCEARLYTALENT1
+  workday_extra_sites: [rbcglobal1]
   priority: 1
 - name: Robinhood
   priority: 1
@@ -263,6 +266,7 @@ companies:
   tenant: manulife
   wd: wd3
   site: MFCJH_Jobs
+  workday_extra_sites: [MFCJH_adminJobs]
   priority: 2
 - name: Okta
   priority: 2
@@ -811,6 +815,7 @@ companies:
   tenant: sunlife
   wd: wd3
   site: Experienced-Jobs
+  workday_extra_sites: [Campus]
   priority: 4
 - name: OMERS
   ats: workday
@@ -1111,6 +1116,11 @@ companies:
   tenant: verizon
   wd: wd12
   site: verizon-careers
+  # Verizon's search matches ANY word ("technology intern" -> ~1000 jobs), so the 11 default
+  # phrase searches paged ~5,600 jobs a scan and drew 429s. One search inside Technology: ~27.
+  workday_search_terms: [intern]
+  workday_applied_facets:
+    jobFamilyGroup: [4466d54cbeba1000ae7ce217cd6d0001]  # Technology
 - name: Wells Fargo
   priority: 4
   ats: workday
@@ -1879,6 +1889,322 @@ companies:
   ats: digitalrecruiters
   slug: jobs.momentfactory.com
   site: en
+# Added 2026-11-13 (workflow: Canadian/US expansion)
+- name: Apera AI
+  priority: 4
+  ats: greenhouse
+  slug: aperaaiinc
+- name: Veralto
+  priority: 4
+  ats: phenom
+  slug: DANVGTGLOBAL
+  site: global/en
+  host: jobs.veralto.com
+- name: Corpay
+  priority: 4
+  ats: workday
+  tenant: corpay
+  wd: wd103
+  site: Ext_001
+- name: Amgen
+  priority: 4
+  ats: radancy
+  host: careers.amgen.com
+- name: Zymeworks
+  priority: 4
+  ats: rippling
+  slug: zymeworks-careers
+- name: A Thinking Ape
+  priority: 4
+  ats: greenhouse
+  slug: athinkingape
+- name: BC Pension Corporation
+  priority: 4
+  ats: oraclehcm
+  site: CX_1013
+  host: fa-exby-saasfaprod1.fa.ocs.oraclecloud.com
+- name: BCI
+  priority: 4
+  ats: workday
+  tenant: bci
+  wd: wd10
+  site: BCI_Careers
+- name: Hexagon
+  priority: 4
+  ats: icims
+  host: careers-hexagonpositioning.icims.com
+- name: Enbridge
+  priority: 4
+  ats: workday
+  tenant: enbridge
+  wd: wd3
+  site: enbridge_careers
+- name: Suncor
+  priority: 4
+  ats: workday
+  tenant: suncor
+  wd: wd1
+  site: Suncor_External
+- name: ATB Financial
+  priority: 4
+  ats: eightfold
+  slug: atb.com
+  host: atb.eightfold.ai
+- name: Mackenzie Investments
+  priority: 4
+  ats: icims
+  host: careersen-mackenzieinvestments.icims.com
+- name: Equitable Bank
+  priority: 4
+  ats: lever
+  slug: eqbank
+- name: Foresters Financial
+  priority: 4
+  ats: workday
+  tenant: foresters
+  wd: wd3
+  site: ForestersFinancialCareers
+- name: Citco
+  priority: 4
+  ats: oraclehcm
+  site: CX_1
+  host: fa-euxc-saasfaprod1.fa.ocs.oraclecloud.com
+- name: Moneris
+  priority: 4
+  ats: workday
+  tenant: moneris
+  wd: wd3
+  site: Moneris
+- name: HOOPP
+  priority: 4
+  ats: workday
+  tenant: hoopp
+  wd: wd10
+  site: HOOPP
+- name: iA Financial Group
+  priority: 4
+  ats: workday
+  tenant: ia
+  wd: wd3
+  site: Professional
+- name: CDPQ
+  priority: 4
+  ats: workday
+  tenant: cdpq
+  wd: wd10
+  site: CDPQ-recrutement-universitaire
+  workday_extra_sites: [CDPQ]
+- name: PSP Investments
+  priority: 4
+  ats: workday
+  tenant: investpsp
+  wd: wd3
+  site: psp_careers
+- name: Air Canada
+  priority: 4
+  ats: phenom
+  slug: AIPACICA
+  site: ca/en
+  host: careers.aircanada.com
+- name: Achievers
+  priority: 4
+  ats: lever
+  slug: achievers
+- name: Index Exchange
+  priority: 4
+  ats: gem
+  slug: index-exchange
+- name: Konrad Group
+  priority: 4
+  ats: greenhouse
+  slug: konradgroup
+- name: Deep Genomics
+  priority: 4
+  ats: lever
+  slug: deepgenomics
+- name: Plooto
+  priority: 4
+  ats: lever
+  slug: plooto
+- name: AlayaCare
+  priority: 4
+  ats: greenhouse
+  slug: alayacare
+- name: SOTI
+  priority: 4
+  ats: workday
+  tenant: soti
+  wd: wd3
+  site: Careers
+- name: Bree
+  priority: 4
+  ats: ashby
+  slug: bree
+- name: theScore
+  priority: 4
+  ats: greenhouse
+  slug: penninteractive
+- name: ShyftLabs
+  priority: 4
+  ats: lever
+  slug: shyftlabs
+- name: Kepler Communications
+  priority: 4
+  ats: lever
+  slug: kepler
+- name: Loop
+  priority: 4
+  ats: rippling
+  slug: loop-careers
+- name: Harris Computer
+  priority: 4
+  ats: workday
+  tenant: harriscomputer
+  wd: wd3
+  site: '1'
+- name: Volaris Group
+  priority: 4
+  ats: workday
+  tenant: volarisgroup
+  wd: wd3
+  site: Volaris
+- name: Valsoft Corporation
+  priority: 4
+  ats: workable
+  slug: valsoft
+- name: Terminal
+  priority: 4
+  ats: ashby
+  slug: terminal
+- name: Beenox
+  priority: 4
+  ats: phenom
+  slug: BEENUS
+  site: us/en
+  host: careers.beenox.com
+- name: Workleap
+  priority: 4
+  ats: greenhouse
+  slug: workleap
+- name: Telesat
+  priority: 4
+  ats: lever
+  slug: telesat
+- name: General Dynamics Mission Systems-Canada
+  priority: 4
+  ats: smartrecruiters
+  slug: GDMSI
+- name: Solink
+  priority: 4
+  ats: ashby
+  slug: solink
+- name: Thales
+  priority: 4
+  ats: phenom
+  slug: TGPTGWGLOBAL
+  site: global/en
+  host: careers.thalesgroup.com
+- name: TechInsights
+  priority: 4
+  ats: jazzhr
+  slug: techinsights
+- name: Mirego
+  priority: 4
+  ats: lever
+  slug: mirego
+- name: Airbus
+  priority: 4
+  ats: workday
+  tenant: ag
+  wd: wd3
+  site: Airbus
+- name: Grass Valley
+  priority: 4
+  ats: jazzhr
+  slug: grassvalley
+- name: Calix
+  priority: 4
+  ats: workday
+  tenant: calix
+  wd: wd1
+  site: External
+- name: Revvity
+  priority: 4
+  ats: radancy
+  host: jobs.revvity.com
+- name: ResMed
+  priority: 4
+  ats: workday
+  tenant: resmed
+  wd: wd3
+  site: Resmed_External_Careers
+- name: McKesson
+  priority: 4
+  ats: radancy
+  host: careers.mckesson.com
+- name: Rockwell Automation
+  priority: 4
+  ats: workday
+  tenant: rockwellautomation
+  wd: wd1
+  site: External_Rockwell_Automation
+- name: StandardAero
+  priority: 4
+  ats: oraclehcm
+  site: CX_3
+  host: cva.fa.us1.oraclecloud.com
+- name: Brave
+  priority: 4
+  ats: greenhouse
+  slug: brave
+- name: Khan Academy
+  priority: 4
+  ats: greenhouse
+  slug: khanacademy
+- name: L3Harris
+  priority: 4
+  ats: radancy
+  host: careers.l3harris.com
+- name: LabCorp
+  priority: 4
+  ats: workday
+  tenant: labcorp
+  wd: wd1
+  site: External
+- name: Cresta
+  priority: 4
+  ats: greenhouse
+  slug: cresta
+- name: Cerebras
+  priority: 4
+  ats: ashby
+  slug: cerebras
+- name: Veeva Systems
+  priority: 4
+  ats: lever
+  slug: veeva
+- name: Zip
+  priority: 4
+  ats: ashby
+  slug: zip
+- name: Trimble
+  priority: 4
+  ats: workday
+  tenant: trimble
+  wd: wd1
+  site: TrimbleCareers
+- name: Magna International
+  priority: 4
+  ats: workday
+  tenant: magna
+  wd: wd3
+  site: Magna
+- name: Lumentum
+  priority: 4
+  ats: workday
+  tenant: lumentum
+  wd: wd5
+  site: LITE
 - name: SimplifyJobs
   ats: simplify
   priority: 4
