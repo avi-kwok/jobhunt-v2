@@ -154,7 +154,7 @@ criteria:
   # reliable timestamp (Workday; Greenhouse reports edit-time) are always included
   # and rely on the seen-store's "new since last scan" guarantee. Set to null/0 to
   # disable and use the seen-store alone.
-  freshness_minutes: 360
+  freshness_minutes: 2160               # 36 h; date-only postings get the whole posting day on top
 
   # LLM REVIEW (llm_tiebreak.py). Every title with a role match that passes every other
   # gate (intern/co-op, excludes, years, location, freshness) gets one Claude Haiku
