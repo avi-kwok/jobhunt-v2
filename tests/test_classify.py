@@ -257,6 +257,7 @@ def test_v2_rejected(title):
     "Stage - Développeur Web",
     "Stage en développement logiciel",
     "Werkstudent Software Engineering",
+    "Developer, RBC Amplify 2027, Toronto",
 ])
 def test_v2_eligible(title):
     c = cls(title, "Toronto, ON")

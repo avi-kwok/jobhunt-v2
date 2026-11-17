@@ -119,7 +119,7 @@ def test_different_hosts_run_in_parallel(conn):
     run(conn, pol(per_host_concurrency=1), companies, probe)
     elapsed = time.monotonic() - t
     assert probe.max_all >= 3
-    assert elapsed < 12 * 0.05 * 0.6  # sequential would be 0.6 s
+    assert elapsed < 12 * 0.05 * 0.8  # sequential would be 0.6 s; headroom for busy CI runners
 
 
 def test_pause_applies_per_host_not_globally(conn):

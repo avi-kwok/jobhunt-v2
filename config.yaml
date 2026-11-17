@@ -19,7 +19,8 @@ criteria:
   # stagiaire (Quebec French) / werkstudent added; French "stage" is matched only in
   # intern-shaped positions in classify.py (bare "stage" hits "Stage 0 Propellant").
   internship_terms: [intern, internship, "co-op", coop, "co op", student, campus,
-                     stagiaire, werkstudent]
+                     stagiaire, werkstudent,
+                     rbc amplify, rbc amplifie]   # RBC's summer internship program never says "intern"
 
   # TITLE must contain at least one of these (a SWE/dev/infra/security role).
   # v2: the PM-adjacent group (product manager, APM, TPM, product owner, product
