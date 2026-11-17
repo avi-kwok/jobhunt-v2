@@ -238,3 +238,22 @@ def test_flexible_any_site_is_unresolved():
     assert _is_unresolved_location("Any SpaceX Site")
     assert not _is_unresolved_location("Flexible - London, UK")
     assert not _is_unresolved_location("Hawthorne, CA")
+
+
+def _on_date(d):
+    j = _job("Software Engineer Intern", "Toronto")
+    j.posted_at = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)  # bare date
+    return j
+
+
+def test_date_only_posting_stays_fresh_through_its_day():
+    # A role dated today, first seen at 12:00 UTC (12 h after "midnight"), is fresh.
+    assert is_fresh(_on_date(NOW), 360, now=NOW) is True
+    # Dated yesterday: fresh until 06:00 UTC today (end of its day + 6 h window).
+    assert is_fresh(_on_date(NOW - timedelta(days=1)), 360, now=NOW.replace(hour=5)) is True
+    assert is_fresh(_on_date(NOW - timedelta(days=1)), 360, now=NOW) is False
+    assert is_fresh(_on_date(NOW - timedelta(days=5)), 360, now=NOW) is False
+
+
+def test_exact_timestamp_not_treated_as_date_only():
+    assert is_fresh(_dated(11 * 60), 360, now=NOW) is False  # 01:00 UTC, 11 h old

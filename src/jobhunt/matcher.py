@@ -81,6 +81,9 @@ def is_fresh(
     - Disabled (None/0)          -> always fresh (rely on the seen-store alone).
     - No posting timestamp        -> fresh (undated sources trust the seen-store).
     - Has a timestamp             -> fresh iff its age <= the window.
+    - Date-only (exactly midnight UTC, how many sources store a bare posting date)
+                                  -> the window runs from the END of that day, since the
+                                     role may have gone up at any hour of it.
 
     Naive timestamps are treated as UTC. Future timestamps (clock skew) count
     as fresh.
@@ -94,7 +97,16 @@ def is_fresh(
         posted = posted.replace(tzinfo=timezone.utc)
     now = now or datetime.now(timezone.utc)
     age = now - posted
+    if is_date_only(posted):
+        age -= timedelta(days=1)
     return age <= timedelta(minutes=freshness_minutes)
+
+
+def is_date_only(posted: datetime) -> bool:
+    """A bare date stored as midnight UTC (e.g. Eightfold, Oracle HCM postedDate)."""
+    if posted.tzinfo is not None:
+        posted = posted.astimezone(timezone.utc)
+    return (posted.hour, posted.minute, posted.second, posted.microsecond) == (0, 0, 0, 0)
 
 
 def _strip_exempt(title: str, exempt_terms: list[str]) -> str:

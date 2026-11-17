@@ -20,8 +20,8 @@ def cls(title, location=None, description=None, company="X"):
 
 
 def test_rules_version():
-    assert RULES_VERSION == 4
-    assert cls("Software Engineer Intern").rules_version == 4
+    assert RULES_VERSION == 5
+    assert cls("Software Engineer Intern").rules_version == 5
 
 
 @pytest.mark.parametrize(
@@ -214,6 +214,11 @@ def test_mobile_swe_phrases_eligible(title):
     "Oncology Late Stage Clinical Development Scientist",
     "HR Stage",
     "PhD Software Engineer Intern",
+    # no QA roles, even with a developer term
+    "Software QA Intern",
+    "QA/Test Automation Developer Intern - Tucson, AZ",
+    "IBM Z Engineering System Test QA/Test Developer Intern - Poughkeepsie, NY",
+    "Software Quality Assurance Co-op",
 ])
 def test_v2_rejected(title):
     c = cls(title, "Denver, CO")
@@ -232,7 +237,6 @@ def test_v2_rejected(title):
     "Embedded Engineer Intern",
     "Software Intern",
     "Software Internship - Summer 2027",
-    "Software QA Intern",
     "Software Test Co-op",
     "Software Tools Intern",
     "Quantitative Developer Intern",
@@ -442,3 +446,19 @@ def test_curly_apostrophe_masters_excluded():
 ])
 def test_cyber_security_spellings(title):
     assert cls(title, "Toronto, ON").eligible
+
+
+@pytest.mark.parametrize("location,countries", [
+    ("Ehningen, DE", []),            # Germany, not Delaware
+    ("Bangalore, IN", []),           # India, not Indiana
+    ("Bogota, CO", []),              # Colombia, not Colorado
+    ("Buenos Aires, AR", []),        # Argentina, not Arkansas
+    ("Wilmington, DE", ["US"]),
+    ("Newark, DE 19711", ["US"]),
+    ("Indianapolis, IN", ["US"]),
+    ("Littleton, CO", ["US"]),
+    ("Bentonville, AR", ["US"]),
+    ("Hillsboro,OR", ["US"]),
+])
+def test_state_codes_that_are_also_country_codes(location, countries):
+    assert cls("Software Engineer Intern", location).countries == countries

@@ -27,7 +27,7 @@ from .llm_tiebreak import LLM_TAG, REJECT_PREFIX, Verdict
 from .matcher import _is_remote, _is_unresolved_location
 from .models import Criteria, Job
 
-RULES_VERSION = 4
+RULES_VERSION = 5
 REJECT_MAX = 160
 
 # ---- term lists -----------------------------------------------------------
@@ -308,8 +308,12 @@ _CODE_RE = re.compile(r"\b[A-Z]{2}\b")
 # of the omitted codes above is a US state ("Littleton, CO", "Longmont, CO 80501",
 # "Hillsboro,OR"). Multi-comma forms ("Bogota, DC, CO") don't qualify.
 _US_STATE_SEG_RE = re.compile(
-    r"(?:^|;)\s*[^,;]+,\s*(?:CO|IN|DE|OR|OK|ME|HI|AR)(?:\s+\d{5}(?:-\d{4})?)?\s*(?=;|$)"
+    r"(?:^|;)\s*(?P<city>[^,;]+),\s*(?P<st>CO|IN|DE|OR|OK|ME|HI|AR)(?:\s+\d{5}(?:-\d{4})?)?\s*(?=;|$)"
 )
+# Of those codes, these are also ISO country codes (Germany, India, Colombia, Argentina):
+# "Ehningen, DE" is Germany. A segment ending in one counts as US only when the gazetteer
+# knows the city in that state ("Wilmington, DE") or a ZIP code follows.
+_STATE_OR_COUNTRY = {"DE", "IN", "CO", "AR"}
 # Terms in the tier lists that are countries/provinces/regions, not cities.
 _NOT_CITIES = {"canada", "ontario", "british columbia", "quebec", "remote"}
 
@@ -424,8 +428,12 @@ def _detect_location(location: str, rules: _Rules) -> _Loc:
         ca = True
 
     foreign = bool((_FOREIGN_RE and _FOREIGN_RE.search(low)) or _UK_TOKEN_RE.search(location))
-    if not foreign and _US_STATE_SEG_RE.search(location):
-        us = True
+    if not foreign:
+        for m in _US_STATE_SEG_RE.finditer(location):
+            st = m.group("st")
+            if (st not in _STATE_OR_COUNTRY or re.search(r"\d{5}", m.group(0))
+                    or _city_country(m.group("city"), st) == "US"):
+                us = True
     countries = [c for c, on in (("CA", ca), ("US", us)) if on]
     return _Loc(countries, cities, foreign)
 

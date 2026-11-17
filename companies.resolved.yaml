@@ -21,10 +21,10 @@ companies:
   slug: anthropic
   priority: 1
 - name: Autodesk
-  ats: workday
-  tenant: autodesk
-  wd: wd1
-  site: Ext
+  # Moved off Workday (autodesk.wd1 "Ext" now holds ~4 jobs) to Eightfold, Nov 2026.
+  ats: eightfold
+  slug: autodesk.com
+  host: jobs.autodesk.com
   priority: 1
 - name: BMO
   ats: workday

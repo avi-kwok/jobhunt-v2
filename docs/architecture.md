@@ -78,6 +78,11 @@ appends to on every fire; stale after 90 min).
   `freshness_minutes` window applies (a row first seen more than 6 h after Simplify listed it is
   stored as stale, never alerted). Exactly-midnight UTC values are date-only: `posted_at` stays
   None and freshness comes from first-seen. Alerts show the listing time "via SimplifyJobs".
+- **Date-only timestamps elsewhere.** Many adapters only get a posting date (Amazon, IBM, Oracle
+  HCM, SuccessFactors, Phenom, Radancy, Workable, Avature, BambooHR, most Eightfold tenants), stored
+  as midnight UTC. `matcher.is_fresh` treats an exactly-midnight UTC `posted_at` as the whole day:
+  the freshness window runs from the end of that day. Before Nov 2026 it ran from midnight, so
+  anything first seen after 06:00 UTC on its posting day was stored as stale and never alerted.
 - The body and ETag are cached in `logs/simplify_cache.json` / `.etag`; the fetch is conditional
   (`If-None-Match`, 304 reuses the cache). A failed fetch raises; stale data is never served silently.
 

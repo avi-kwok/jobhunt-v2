@@ -89,7 +89,6 @@ criteria:
     - software intern
     - software internship
     - software co-op
-    - software qa
     - software test
     - software tools
     - quantitative developer
@@ -126,6 +125,8 @@ criteria:
     - graduate student
     - mba candidate
     - full-time        # tune: remove if it drops valid "full-time internship" posts
+    - qa               # no QA roles, even "QA/Test Automation Developer Intern"
+    - quality assurance
 
   # Phrases stripped from the title BEFORE exclude_terms is checked.
   # "BS/MS/PhD" postings are open to undergrads; keep them past the "phd" exclude.
