@@ -98,3 +98,19 @@ def test_simplify_posted_shows_via_label():
     j = Job(source="simplify", company="Tesla", external_id="1", title="SWE Intern",
             url="https://x.example/1", posted_at=datetime(2026, 11, 13, 7, 15, tzinfo=timezone.utc))
     assert _posted_display(j).endswith(") via SimplifyJobs")
+
+
+def test_date_only_posting_shows_plain_date_and_no_footer_time():
+    # Phenom/Eightfold/etc. give a date only -> midnight UTC. Must not render as
+    # "Nov 17, 5:00 PM" in Pacific, nor carry a footer timestamp.
+    job = Job(source="phenom", company="Bose", external_id="1", title="Software Engineer Co-op",
+              url="https://x.example/1", posted_at=datetime(2026, 11, 18, tzinfo=timezone.utc))
+    assert _posted_field(job) == "Nov 18, 2026"
+    assert "timestamp" not in _embed(job)
+
+
+def test_exact_non_midnight_time_keeps_discord_markdown_and_footer():
+    job = Job(source="greenhouse", company="Airbnb", external_id="2", title="SWE Intern",
+              url="https://x.example/2", posted_at=datetime(2026, 11, 18, 5, 0, 14, tzinfo=timezone.utc))
+    assert _posted_field(job).startswith("<t:")
+    assert "timestamp" in _embed(job)

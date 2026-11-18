@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .matcher import is_date_only
 from .models import Job
 from .security import redact
 
@@ -62,11 +63,18 @@ def _posted_display(job: Job) -> str:
     Prefers an exact timestamp (rendered as Discord dynamic markdown that shows
     the reader's local date/time plus a live "x days ago"); falls back to the
     relative note some sources give (Workday), else "unknown".
+
+    Date-only sources (midnight UTC, see matcher.is_date_only) show the plain
+    calendar date: rendering midnight UTC in the reader's zone would invent an
+    hour (e.g. "Nov 17, 5:00 PM" in Pacific for a Nov 18 posting).
     """
     if job.posted_at is not None:
         posted = job.posted_at
         if posted.tzinfo is None:  # naive timestamps are treated as UTC
             posted = posted.replace(tzinfo=timezone.utc)
+        if is_date_only(posted):
+            day = posted.astimezone(timezone.utc)
+            return f"{day:%b} {day.day}, {day.year}"
         epoch = int(posted.timestamp())
         via = " via SimplifyJobs" if job.source == "simplify" else ""
         return f"<t:{epoch}:f> (<t:{epoch}:R>){via}"
@@ -112,7 +120,8 @@ def alert_embed(
         posted = job.posted_at
         if posted.tzinfo is None:
             posted = posted.replace(tzinfo=timezone.utc)
-        embed["timestamp"] = posted.isoformat()
+        if not is_date_only(posted):  # no footer time we don't actually know
+            embed["timestamp"] = posted.isoformat()
     return embed
 
 
