@@ -20,7 +20,7 @@ from . import crypto, llm_tiebreak, pipeline, scheduler, security, webhooks
 from .budget import BudgetExceeded, BudgetGuard  # tailor + `budget` command only
 from .config import load_config
 from .models import LLMTiebreakConfig
-from .notifier import DiscordNotifier
+from .notifier import DiscordHTTPError, DiscordNotifier
 from .watchdog import start_watchdog
 
 app = typer.Typer(
@@ -657,6 +657,53 @@ def subscriber_remove(
         console.print(f"[yellow]No subscriber {sub_id}.[/]")
         raise typer.Exit(1)
     console.print(f"Removed subscriber {sub_id}.")
+
+
+@app.command()
+def broadcast(
+    message_file: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                        help="Discord-markdown text file; becomes the embed body."),
+    to: list[int] = typer.Option(None, "--to", help="Only these active subscriber ids (repeatable)."),
+    color: str = typer.Option("2ECC71", "--color", help="Embed sidebar colour, hex (default green)."),
+    yes: bool = typer.Option(False, "--yes", help="Required to send to every active subscriber."),
+    db_path: str = typer.Option(None, "--db", help=DB_HELP),
+) -> None:
+    """Post one announcement embed to active subscribers (all, or --to ids)."""
+    text = message_file.read_text(encoding="utf-8").strip()
+    if not text or len(text) > 4096:  # Discord embed description limit
+        console.print("[red]Message must be 1-4096 characters.[/]")
+        raise typer.Exit(2)
+    try:
+        embed = {"description": text, "color": int(color.removeprefix("#").removeprefix("0x"), 16)}
+    except ValueError:
+        console.print("[red]--color must be hex, e.g. 2ECC71.[/]")
+        raise typer.Exit(2)
+    if not to and not yes:
+        console.print("[red]Sending to every active subscriber needs --yes (or use --to ID).[/]")
+        raise typer.Exit(2)
+    conn = v2db.connect(db_path)
+    try:
+        subs = [s for s in v2db.list_active_subscribers(conn) if not to or s.id in to]
+        missing = sorted(set(to or []) - {s.id for s in subs})
+        if missing:
+            console.print(f"[yellow]Not active, skipped: {missing}[/]")
+        sent, failed = 0, []
+        for s in subs:
+            try:
+                hook = webhooks.parse(crypto.decrypt_url(s.webhook_enc))
+                DiscordNotifier(hook.url).send_embeds([embed])
+                sent += 1
+            except Exception as exc:  # noqa: BLE001 - one bad webhook must not stop the rest
+                failed.append(s.id)
+                console.print(f"[red]subscriber {s.id}: {escape(security.redact(str(exc)))}[/]")
+                if isinstance(exc, DiscordHTTPError) and exc.status_code in (401, 404):
+                    v2db.disable_subscriber(
+                        conn, s.id, f"discord webhook returned {exc.status_code} (deleted/invalid)")
+    finally:
+        conn.close()
+    console.print(f"Broadcast sent to {sent} subscriber(s); failed: {failed or 'none'}.")
+    if failed:
+        raise typer.Exit(1)
 
 
 feedback_app = typer.Typer(help="Read feedback from the web form (admin).", no_args_is_help=True)

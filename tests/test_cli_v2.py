@@ -203,3 +203,45 @@ def test_feedback_list_prints_user_text_literally(tmp_path):
     r = runner.invoke(cli.app, ["feedback", "list", "--db", path])
     assert r.exit_code == 0
     assert "[red]loud[/red]" in r.output and "\x1b" not in r.output
+
+
+def test_broadcast_sends_green_embed_and_disables_deleted_webhooks(tmp_path):
+    import json
+
+    import respx
+
+    path = str(tmp_path / "v2.db")
+    for n in (1, 2, 3):
+        assert _add(path, env_val=hook_url(n)).exit_code == 0
+    msg = tmp_path / "msg.md"
+    msg.write_text("Hello **all**\n\nline two\n")
+    with respx.mock() as m:
+        ok = m.post(url__regex=r".*/api/webhooks/0+1/.*").respond(204)
+        m.post(url__regex=r".*/api/webhooks/0+2/.*").respond(404)
+        m.post(url__regex=r".*/api/webhooks/0+3/.*").respond(204)
+        r = runner.invoke(cli.app, ["broadcast", str(msg), "--yes", "--db", path])
+    assert r.exit_code == 1 and "sent to 2" in r.output and "B" * 20 not in r.output.replace("\n", "")
+    body = json.loads(ok.calls[0].request.content)
+    assert body["embeds"] == [{"description": "Hello **all**\n\nline two", "color": 0x2ECC71}]
+    assert body["allowed_mentions"] == {"parse": []}
+    conn = db.connect(path)
+    assert {s.id: s.status for s in db.list_subscribers(conn)}[2] == "disabled"
+    conn.close()
+
+
+def test_broadcast_needs_yes_unless_targeted(tmp_path):
+    import respx
+
+    path = str(tmp_path / "v2.db")
+    for n in (1, 2):
+        assert _add(path, env_val=hook_url(n)).exit_code == 0
+    msg = tmp_path / "msg.md"
+    msg.write_text("hi")
+    with respx.mock() as m:
+        route = m.post(url__regex=r".*/api/webhooks/.*").respond(204)
+        assert runner.invoke(cli.app, ["broadcast", str(msg), "--db", path]).exit_code == 2
+        assert route.call_count == 0
+        r = runner.invoke(cli.app, ["broadcast", str(msg), "--to", "1", "--to", "9", "--db", path])
+    assert r.exit_code == 0 and route.call_count == 1 and "[9]" in r.output
+    msg.write_text("x" * 4097)
+    assert runner.invoke(cli.app, ["broadcast", str(msg), "--to", "1", "--db", path]).exit_code == 2
