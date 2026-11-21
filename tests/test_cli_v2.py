@@ -230,6 +230,8 @@ def test_broadcast_sends_green_embed_and_disables_deleted_webhooks(tmp_path):
 
 
 def test_broadcast_needs_yes_unless_targeted(tmp_path):
+    import json
+
     import respx
 
     path = str(tmp_path / "v2.db")
@@ -241,7 +243,11 @@ def test_broadcast_needs_yes_unless_targeted(tmp_path):
         route = m.post(url__regex=r".*/api/webhooks/.*").respond(204)
         assert runner.invoke(cli.app, ["broadcast", str(msg), "--db", path]).exit_code == 2
         assert route.call_count == 0
-        r = runner.invoke(cli.app, ["broadcast", str(msg), "--to", "1", "--to", "9", "--db", path])
+        r = runner.invoke(cli.app, ["broadcast", str(msg), "--to", "1", "--to", "9",
+                                    "--title", "A note", "--db", path])
     assert r.exit_code == 0 and route.call_count == 1 and "[9]" in r.output
+    assert json.loads(route.calls[0].request.content)["embeds"][0]["title"] == "A note"
+    assert runner.invoke(cli.app, ["broadcast", str(msg), "--to", "1", "--title", "t" * 257,
+                                   "--db", path]).exit_code == 2
     msg.write_text("x" * 4097)
     assert runner.invoke(cli.app, ["broadcast", str(msg), "--to", "1", "--db", path]).exit_code == 2

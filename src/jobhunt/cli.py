@@ -665,6 +665,7 @@ def broadcast(
                                         help="Discord-markdown text file; becomes the embed body."),
     to: list[int] = typer.Option(None, "--to", help="Only these active subscriber ids (repeatable)."),
     color: str = typer.Option("2ECC71", "--color", help="Embed sidebar colour, hex (default green)."),
+    title: str = typer.Option("", "--title", help="Embed header (max 256 characters)."),
     yes: bool = typer.Option(False, "--yes", help="Required to send to every active subscriber."),
     db_path: str = typer.Option(None, "--db", help=DB_HELP),
 ) -> None:
@@ -673,8 +674,13 @@ def broadcast(
     if not text or len(text) > 4096:  # Discord embed description limit
         console.print("[red]Message must be 1-4096 characters.[/]")
         raise typer.Exit(2)
+    if len(title) > 256:  # Discord embed title limit
+        console.print("[red]--title must be at most 256 characters.[/]")
+        raise typer.Exit(2)
     try:
         embed = {"description": text, "color": int(color.removeprefix("#").removeprefix("0x"), 16)}
+        if title.strip():
+            embed["title"] = title.strip()
     except ValueError:
         console.print("[red]--color must be hex, e.g. 2ECC71.[/]")
         raise typer.Exit(2)
