@@ -31,6 +31,9 @@ dist/
 .venv/
 venv/
 
+# node (for @vercel/analytics)
+node_modules/
+
 jobhunt_v2.db*
 
 # local postgres for tests

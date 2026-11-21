@@ -1,0 +1,27 @@
+{
+  "name": "primary",
+  "version": "1.0.0",
+  "description": "A continuation of [jobhunt v1](https://github.com/avi-kwok/jobhunt), my personal internship scanner. v2 turns it into a free service: paste a Discord webhook URL on the website and get software engineering (and adjacent) internship and co-op alerts for Canada and the US in that channel. No LLM, no accounts, $0 to run.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/avi-kwok/jobhunt-v2.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/avi-kwok/jobhunt-v2/issues"
+  },
+  "homepage": "https://github.com/avi-kwok/jobhunt-v2#readme",
+  "dependencies": {
+    "@vercel/analytics": "^2.0.1"
+  }
+}
