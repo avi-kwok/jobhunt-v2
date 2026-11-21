@@ -659,6 +659,35 @@ def subscriber_remove(
     console.print(f"Removed subscriber {sub_id}.")
 
 
+feedback_app = typer.Typer(help="Read feedback from the web form (admin).", no_args_is_help=True)
+app.add_typer(feedback_app, name="feedback")
+
+
+def _plain(text: str) -> str:
+    """User-written text, safe to print: no terminal control codes, no rich markup."""
+    return escape("".join(c if c.isprintable() or c == "\n" else " " for c in text))
+
+
+@feedback_app.command("list")
+def feedback_list(
+    limit: int = typer.Option(50, "--limit"),
+    db_path: str = typer.Option(None, "--db", help=DB_HELP),
+) -> None:
+    """Newest feedback first."""
+    conn = v2db.connect(db_path)
+    try:
+        rows = v2db.list_feedback(conn, limit)
+    finally:
+        conn.close()
+    table = Table(title="Feedback", show_lines=True)
+    for col in ("ID", "Sent", "Good", "Improve", "Features"):
+        table.add_column(col)
+    for fid, sent, good, improve, features in rows:
+        table.add_row(str(fid), sent[:16], _plain(good) or "-", _plain(improve) or "-",
+                      _plain(features) or "-")
+    console.print(table)
+
+
 # ---- tailor ---------------------------------------------------------------
 
 @app.command()

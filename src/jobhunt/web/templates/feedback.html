@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Feedback - jobhunt{% endblock %}
+{% block body %}
+<h1>Feedback</h1>
+<p>Tell me what works, what doesn't, and what you'd like added. No need to answer every question: share whatever's on your mind, even a single line in one box. It's anonymous: no name or webhook is attached.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/feedback">
+<label>What's good?
+<textarea name="good" rows="4" maxlength="2000">{{ form.good }}</textarea></label>
+<label>What needs improvement?
+<textarea name="improve" rows="4" maxlength="2000">{{ form.improve }}</textarea></label>
+<label>What features would you like added?
+<textarea name="features" rows="4" maxlength="2000">{{ form.features }}</textarea></label>
+<div><button type="submit">Send feedback</button></div>
+</form>
+{% endblock %}

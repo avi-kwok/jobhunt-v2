@@ -1,6 +1,6 @@
 """jobhunt web: paste a Discord webhook, confirm via a private link posted into the channel.
 
-No accounts, no cookies, no JavaScript. Possession of the manage token (readable only by
+No accounts, no cookies, no JavaScript of our own (only Vercel Web Analytics' script). Possession of the manage token (readable only by
 people who can read the channel) is the only credential. See docs/architecture.md.
 """
 
@@ -17,7 +17,8 @@ import httpx
 import jinja2
 from fastapi import FastAPI, Form, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
+                               Response)
 from fastapi.templating import Jinja2Templates
 
 from .. import crypto, db, ingest, webhooks
@@ -28,6 +29,8 @@ COUNTRIES = ("CA", "US")
 LEVELS = ("internship", "coop")
 SUBSCRIBE_PER_IP_PER_HOUR = 10
 MESSAGES_PER_WEBHOOK_PER_DAY = 3
+FEEDBACK_PER_IP_PER_HOUR = 5
+FEEDBACK_MAX = 2000
 INGEST_PER_HOUR = 60  # rate_limit_hit is a fixed one-hour window
 INGEST_MIN_SECRET = 32
 DISCORD_TIMEOUT = 5.0
@@ -159,6 +162,51 @@ def privacy(request: Request):
 @app.get("/terms", response_class=HTMLResponse)
 def terms(request: Request):
     return _page(request, "terms.html")
+
+
+@app.get("/feedback", response_class=HTMLResponse)
+def feedback_get(request: Request, sent: str = ""):
+    if sent:
+        return _message(request, "Thanks! Your feedback was sent.")
+    return _page(request, "feedback.html", error=None, form={})
+
+
+@app.post("/feedback", response_class=HTMLResponse)
+def feedback_post(
+    request: Request,
+    good: str = Form(""),
+    improve: str = Form(""),
+    features: str = Form(""),
+):
+    form = {"good": good.strip(), "improve": improve.strip(), "features": features.strip()}
+    if not any(form.values()):
+        return _page(request, "feedback.html", 400, error="Fill in at least one box.", form=form)
+    if any(len(v) > FEEDBACK_MAX for v in form.values()):
+        return _page(request, "feedback.html", 400,
+                     error=f"Keep each box under {FEEDBACK_MAX} characters.", form=form)
+    conn = _open()
+    try:
+        if not db.rate_limit_hit(conn, crypto.keyed_hash("fb:" + _client_ip(request)),
+                                 FEEDBACK_PER_IP_PER_HOUR):
+            return _message(request, "Too much feedback from here this hour. Try again later.", 429)
+        db.add_feedback(conn, form["good"], form["improve"], form["features"])
+    finally:
+        conn.close()
+    _notify_admin_feedback(form)
+    # Redirect-after-POST: reloading the thanks page must not resubmit (and re-ping admin).
+    return RedirectResponse("/feedback?sent=1", status_code=303)
+
+
+def _notify_admin_feedback(form: dict) -> None:
+    """Best-effort ping to #jobhunt-admin; feedback is already saved, so failures are ignored."""
+    try:
+        admin = webhooks.parse(os.environ.get("ADMIN_WEBHOOK_URL", ""))
+    except webhooks.WebhookError:
+        return
+    labels = (("good", "What's good"), ("improve", "Needs improvement"), ("features", "Feature requests"))
+    fields = [{"name": label, "value": form[k][:1024]} for k, label in labels if form[k]]  # Discord field cap
+    _discord_post(admin, {"title": "New feedback", "fields": fields,
+                          "footer": {"text": "jobhunt feedback list"}})
 
 
 @app.get("/static/style.css", include_in_schema=False)

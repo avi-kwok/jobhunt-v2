@@ -19,7 +19,7 @@ def _add(path, env_val=None, **opts):
 
 def test_db_init_and_keygen(tmp_path):
     r = runner.invoke(cli.app, ["db", "init", "--db", str(tmp_path / "x.db")])
-    assert r.exit_code == 0 and "version=4" in r.output
+    assert r.exit_code == 0 and "version=5" in r.output
     r = runner.invoke(cli.app, ["keygen"])
     assert r.exit_code == 0
     from jobhunt import crypto
@@ -193,3 +193,13 @@ def test_scan_error_text_with_markup_does_not_crash(tmp_path, monkeypatch):
     r = runner.invoke(cli.app, ["scan", "--db", path, "--force", "--no-jitter"])
     assert r.exit_code == 0, r.output
     assert "[/x]" in r.output
+
+
+def test_feedback_list_prints_user_text_literally(tmp_path):
+    path = str(tmp_path / "fb.db")
+    c = db.connect(path)
+    db.add_feedback(c, "[red]loud[/red]", "", "bell\x1b[2J")
+    c.close()
+    r = runner.invoke(cli.app, ["feedback", "list", "--db", path])
+    assert r.exit_code == 0
+    assert "[red]loud[/red]" in r.output and "\x1b" not in r.output

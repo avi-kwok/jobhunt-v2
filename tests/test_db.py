@@ -22,7 +22,7 @@ def _count(conn, table):
 
 
 def test_version_and_idempotent_init(conn):
-    assert db.schema_version(conn) == 4
+    assert db.schema_version(conn) == 5
     db.init_schema(conn)
     assert _count(conn, "schema_version") == 1
     assert _count(conn, "rate_limits") == 0
@@ -281,10 +281,10 @@ def test_migrates_v2_database(tmp_path):
     raw.commit()
     raw.close()
     c = db.connect(path)
-    assert db.schema_version(c) == 4
+    assert db.schema_version(c) == 5
     assert db.tags_from_row(c.execute("SELECT * FROM posting_tags").fetchone()).terms == []
     db.init_schema(c)  # idempotent
-    assert db.schema_version(c) == 4
+    assert db.schema_version(c) == 5
     c.close()
 
 
@@ -306,15 +306,16 @@ def test_migrates_v3_database_adds_grad_date(tmp_path):
     raw.commit()
     raw.close()
     c = db.connect(path)
-    assert db.schema_version(c) == 4
+    assert db.schema_version(c) == 5
     (s,) = db.list_subscribers(c)
     assert s.grad_date is None
     db.set_grad_date(c, s.id, "2028-04")
     assert db.get_subscriber(c, s.id).grad_date == "2028-04"
     db.set_grad_date(c, s.id, None)
     assert db.get_subscriber(c, s.id).grad_date is None
+    assert db.list_feedback(c) == []  # v5 table created on upgrade
     db.init_schema(c)  # idempotent
-    assert db.schema_version(c) == 4
+    assert db.schema_version(c) == 5
     c.close()
 
 

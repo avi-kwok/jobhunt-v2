@@ -358,3 +358,67 @@ def test_manage_set_and_clear_grad_date(client, discord, conn):
 def test_signup_page_has_grad_selects(client):
     page = client.get("/").text
     assert 'name="grad_month"' in page and 'name="grad_year"' in page and "No filter" in page
+
+
+# ---- feedback ----------------------------------------------------------------------------
+
+
+def test_feedback_stores_and_thanks(client, conn):
+    assert client.get("/feedback").status_code == 200
+    r = client.post("/feedback", data={"good": " fast alerts ", "improve": "", "features": "<b>x</b>"})
+    assert r.status_code == 200 and "Thanks" in r.text
+    [(_, _, good, improve, features)] = db.list_feedback(conn)
+    assert (good, improve, features) == ("fast alerts", "", "<b>x</b>")
+
+
+def test_feedback_rejects_empty_and_too_long(client, conn):
+    assert client.post("/feedback", data={"good": "  "}).status_code == 400
+    r = client.post("/feedback", data={"good": "a" * (web.FEEDBACK_MAX + 1)})
+    assert r.status_code == 400 and "a" * 50 in r.text  # input kept for editing
+    assert db.list_feedback(conn) == []
+
+
+def test_feedback_rate_limited(client, conn):
+    for _ in range(web.FEEDBACK_PER_IP_PER_HOUR):
+        assert client.post("/feedback", data={"good": "hi"}).status_code == 200
+    assert client.post("/feedback", data={"good": "hi"}).status_code == 429
+    assert len(db.list_feedback(conn)) == web.FEEDBACK_PER_IP_PER_HOUR
+
+
+def test_pages_load_vercel_analytics(client):
+    r = client.get("/")
+    assert '<script defer src="/_vercel/insights/script.js"></script>' in r.text
+    assert 'href="/feedback"' in r.text
+
+
+def test_feedback_pings_admin(client, conn, discord, monkeypatch):
+    monkeypatch.setenv("ADMIN_WEBHOOK_URL", hook_url(9))
+    r = client.post("/feedback", data={"good": "fast", "features": "x" * web.FEEDBACK_MAX})
+    assert r.status_code == 200
+    [req] = posts(discord)
+    assert str(req.url) == hook_url(9)
+    body = json.loads(req.content)
+    assert body["allowed_mentions"] == {"parse": []}
+    fields = body["embeds"][0]["fields"]
+    assert [f["name"] for f in fields] == ["What's good", "Feature requests"]
+    assert fields[0]["value"] == "fast" and len(fields[1]["value"]) == 1024
+
+
+def test_feedback_saved_when_admin_ping_fails_or_unset(client, conn, discord, monkeypatch):
+    monkeypatch.delenv("ADMIN_WEBHOOK_URL", raising=False)
+    assert client.post("/feedback", data={"good": "a"}).status_code == 200
+    assert posts(discord) == []
+    monkeypatch.setenv("ADMIN_WEBHOOK_URL", hook_url(9))
+    discord.post(url__regex=r".*").respond(500)
+    assert client.post("/feedback", data={"good": "b"}).status_code == 200
+    assert len(db.list_feedback(conn)) == 2
+
+
+def test_feedback_redirects_so_reload_does_not_resubmit(client, conn, discord, monkeypatch):
+    monkeypatch.setenv("ADMIN_WEBHOOK_URL", hook_url(9))
+    r = client.post("/feedback", data={"good": "once"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/feedback?sent=1"
+    for _ in range(3):  # reloading the thanks page is a GET: no new row, no new ping
+        page = client.get(r.headers["location"])
+        assert page.status_code == 200 and "Thanks" in page.text
+    assert len(db.list_feedback(conn)) == 1 and len(posts(discord)) == 1

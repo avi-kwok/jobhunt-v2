@@ -19,7 +19,7 @@ from .classify import Classification
 from .models import Job
 
 DEFAULT_DB_PATH = Path("jobhunt_v2.db")
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 PENDING_RETRY_AFTER = timedelta(hours=1)
 MAX_FAIL_CYCLES = 5
 RETENTION_DAYS = 90
@@ -94,13 +94,21 @@ CREATE TABLE IF NOT EXISTS rate_limits (
     count        INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (key_hash, window_start)
 );
+
+CREATE TABLE IF NOT EXISTS feedback (
+    id         {ID_COL},
+    created_at TEXT NOT NULL,
+    good       TEXT NOT NULL DEFAULT '',
+    improve    TEXT NOT NULL DEFAULT '',
+    features   TEXT NOT NULL DEFAULT ''
+);
 """
 
 _SCHEMA_SQLITE = _TABLES.format(ID_COL="INTEGER PRIMARY KEY", SUB_FK="INTEGER")
 _SCHEMA_PG = _TABLES.format(
     ID_COL="BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY", SUB_FK="BIGINT"
 )
-DATA_TABLES = ("rate_limits", "deliveries", "subscribers", "posting_tags", "postings")
+DATA_TABLES = ("feedback", "rate_limits", "deliveries", "subscribers", "posting_tags", "postings")
 
 
 def utcnow_iso() -> str:
@@ -242,6 +250,7 @@ def _migrate(conn: Conn) -> None:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(subscribers)").fetchall()}
         if "grad_date" not in cols:
             conn.execute("ALTER TABLE subscribers ADD COLUMN grad_date TEXT")
+    # v4 -> v5: feedback table only (created by the IF NOT EXISTS above).
 
 
 def schema_version(conn: Conn) -> int:
@@ -616,6 +625,18 @@ def rate_limit_hit(conn: Conn, key_hash: str, limit: int) -> bool:
     ).fetchone()[0]
     conn.commit()
     return n <= limit
+
+
+def add_feedback(conn: Conn, good: str, improve: str, features: str) -> None:
+    conn.execute("INSERT INTO feedback (created_at, good, improve, features) VALUES (?,?,?,?)",
+                 (utcnow_iso(), good, improve, features))
+    conn.commit()
+
+
+def list_feedback(conn: Conn, limit: int = 50) -> list:
+    """Newest first: (id, created_at, good, improve, features)."""
+    return conn.execute("SELECT id, created_at, good, improve, features FROM feedback "
+                        "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
 
 def remove_subscriber(conn: Conn, sub_id: int) -> bool:
