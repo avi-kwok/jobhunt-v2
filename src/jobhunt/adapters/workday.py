@@ -36,6 +36,7 @@ a sequential retry, and ``MAX_PAGES`` caps every individual search.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import time
@@ -224,25 +225,32 @@ class WorkdayAdapter(Adapter):
         return jobs
 
     def _fetch_site(self, company: CompanyConfig, site: str, workers: int) -> list[Job]:
-        """One site on myworkdayjobs.com, falling back to myworkdaysite.com on 520-530."""
+        """One site on myworkdayjobs.com, falling back to myworkdaysite.com on 520-530 or a non-JSON body."""
         fmt = dict(tenant=company.tenant, wd=company.wd, site=site)
         try:
             return self._fetch_board(JOBS_URL.format(**fmt), JOB_BASE.format(**fmt), company, workers)
         except httpx.HTTPStatusError as exc:
             if exc.response is None or exc.response.status_code not in _ORIGIN_DOWN:
                 raise
-            print(
-                f"[workday] {company.name}: {company.tenant}.{company.wd}.myworkdayjobs.com returned "
-                f"{exc.response.status_code}, using {company.wd}.myworkdaysite.com",
-                file=sys.stderr,
+            reason = str(exc.response.status_code)
+        except json.JSONDecodeError:  # empty/HTML/truncated 200 body, still bad after _post_json's retry
+            reason = "a non-JSON body"
+        print(
+            f"[workday] {company.name}: {company.tenant}.{company.wd}.myworkdayjobs.com returned "
+            f"{reason}, using {company.wd}.myworkdaysite.com",
+            file=sys.stderr,
+        )
+        self._budget_end = time.monotonic() + ALT_BUDGET_SECONDS
+        try:
+            return self._fetch_board(
+                ALT_JOBS_URL.format(**fmt), ALT_JOB_BASE.format(**fmt), company, workers
             )
-            self._budget_end = time.monotonic() + ALT_BUDGET_SECONDS
-            try:
-                return self._fetch_board(
-                    ALT_JOBS_URL.format(**fmt), ALT_JOB_BASE.format(**fmt), company, workers
-                )
-            finally:
-                self._budget_end = None
+        except json.JSONDecodeError as exc:  # message is position-only, never the body
+            raise ValueError(
+                f"{company.wd}.myworkdaysite.com fallback returned a non-JSON body ({exc})"
+            ) from None
+        finally:
+            self._budget_end = None
 
     def plan_queries(self, url: str, company: CompanyConfig) -> list[Query]:
         """Decide which searches to run for this board.

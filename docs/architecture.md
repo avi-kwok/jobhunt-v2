@@ -34,11 +34,13 @@ operations: `docs/RUNBOOK.md`. History: `docs/v2-phase0.md`.
    its own query plan and job URLs and results are unioned by uid. A failing extra site is
    skipped; a failing primary site fails the company (so the scan reports it). A 429 still
    triggers the sequential retry. When a `myworkdayjobs.com` pod answers a Cloudflare origin
-   error (520-530) the adapter retries the site on Workday's alternate domain
+   error (520-530), or a 200 whose body is still not JSON after one retry (empty, HTML or
+   truncated), the adapter retries the site on Workday's alternate domain
    `{wd}.myworkdaysite.com` (same cxs API; job links become `/recruiting/{tenant}/{site}/job/...`).
    That fallback is capped at `ALT_BUDGET_SECONDS` (240 s) per site, because the alternate domain
-   can be slow (16-22 s per request in the Nov 2026 wd1/wd5 outage). Uids do not depend on the
-   domain, so switching back and forth never re-alerts.
+   can be slow (16-22 s per request in the Nov 2026 wd1/wd5 outage). If the alternate domain also
+   sends non-JSON, the company fails with a short error that names the domain and never includes
+   the body. Uids do not depend on the domain, so switching back and forth never re-alerts.
    **First scan of a new board.** A board is (source, company), plus the career site for Workday.
    When a board has no posting first seen before this scan (a newly added company or Workday
    site), its new postings are stored silently (`FIRST_SCAN_REASON`) unless they are provably

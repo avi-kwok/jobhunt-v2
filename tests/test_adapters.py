@@ -725,6 +725,57 @@ def test_workday_slow_fallback_hits_budget_and_fails_company(monkeypatch):
     assert alt.call_count == 0 and adapter._budget_end is None
 
 
+_WD_ALT_URL = "https://wd5.myworkdaysite.com/wday/cxs/acme/careers/jobs"
+_WD_ALT_CAMPUS_URL = "https://wd5.myworkdaysite.com/wday/cxs/acme/campus/jobs"
+
+
+@pytest.mark.parametrize("body", ["<html>maintenance</html>", "", '{"jobPostings": [{"tit'])
+@respx.mock
+def test_workday_non_json_primary_falls_back_to_myworkdaysite(monkeypatch, body):
+    from jobhunt.adapters import workday as workday_mod
+    monkeypatch.setattr(workday_mod.time, "sleep", lambda *a, **k: None)
+    primary = respx.post(_WD_URL).mock(return_value=httpx.Response(200, text=body))
+    respx.post(_WD_CAMPUS_URL).mock(return_value=httpx.Response(200, text=body))
+    respx.post(_WD_ALT_URL).mock(
+        return_value=httpx.Response(200, json={"jobPostings": [_wd_posting("R1", "/job/A_R1")]}))
+    respx.post(_WD_ALT_CAMPUS_URL).mock(
+        return_value=httpx.Response(200, json={"jobPostings": [_wd_posting("R2", "/job/A_R2")]}))
+    adapter = WorkdayAdapter(client=httpx.Client())
+    jobs = adapter.fetch(_wd_company())
+    assert [j.external_id for j in jobs] == ["R1", "R2"]
+    assert jobs[0].url == "https://wd5.myworkdaysite.com/recruiting/acme/careers/job/A_R1"
+    assert primary.call_count == 2 and adapter._budget_end is None
+
+
+@respx.mock
+def test_workday_non_json_on_both_domains_fails_company(monkeypatch):
+    from jobhunt.adapters import workday as workday_mod
+    monkeypatch.setattr(workday_mod.time, "sleep", lambda *a, **k: None)
+    html = httpx.Response(200, text="<html>secret maintenance page</html>")
+    primary = respx.post(_WD_URL).mock(return_value=html)
+    respx.post(_WD_CAMPUS_URL).mock(return_value=html)
+    alt = respx.post(_WD_ALT_URL).mock(return_value=html)
+    respx.post(_WD_ALT_CAMPUS_URL).mock(return_value=html)
+    adapter = WorkdayAdapter(client=httpx.Client())
+    with pytest.raises(ValueError, match="myworkdaysite.com fallback returned a non-JSON body") as err:
+        adapter.fetch(_wd_company())
+    assert "html" not in str(err.value) and "secret" not in str(err.value)
+    assert primary.call_count == 2 and alt.call_count == 2  # one retry each, never more
+    assert adapter._budget_end is None
+
+
+@respx.mock
+def test_workday_json_primary_never_touches_myworkdaysite():
+    respx.post(_WD_URL).mock(return_value=httpx.Response(200, json={"jobPostings": [
+        _wd_posting("R1", "/job/A_R1")]}))
+    respx.post(_WD_CAMPUS_URL).mock(return_value=httpx.Response(200, json={"jobPostings": []}))
+    alt = respx.post(url__startswith="https://wd5.myworkdaysite.com/").mock(
+        return_value=httpx.Response(200, json={"jobPostings": []}))
+    jobs = WorkdayAdapter(client=httpx.Client()).fetch(_wd_company())
+    assert [j.url for j in jobs] == ["https://acme.wd5.myworkdayjobs.com/careers/job/A_R1"]
+    assert alt.call_count == 0
+
+
 def test_workday_detail_url_both_domains():
     from jobhunt.adapters.workday import detail_url
     assert detail_url("https://wd1.myworkdaysite.com/recruiting/3m/Search/job/X_R1") == (
