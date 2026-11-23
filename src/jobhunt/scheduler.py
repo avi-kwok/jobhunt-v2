@@ -115,6 +115,12 @@ class ScanReport:
         }
 
 
+# Platforms that may rate-limit all their tenants together (one source IP): cap how many of
+# their companies are fetched at once, across hosts. Eightfold answered 429 on two tenants
+# in the same scan (2026-11-23).
+ATS_CONCURRENCY = {"eightfold": 3}
+
+
 @dataclass
 class _Host:
     cap: int
@@ -149,6 +155,7 @@ def fetch_concurrently(
     dmin, dmax = (pol.company_delay_min, pol.company_delay_max) if pol.enabled else (0.0, 0.0)
     deadline_at = None if not deadline_seconds else clock() + deadline_seconds
     hosts: dict[str, _Host] = {}
+    ats_inflight: dict[str, int] = {}
     pending = list(enumerate(companies))
     running: dict = {}
 
@@ -198,7 +205,8 @@ def fetch_concurrently(
                 idx, company = pending[i]
                 h = host_key(company)
                 st = hosts.setdefault(h, _Host(cap=base_cap))
-                if st.inflight >= st.cap:
+                ats = company.ats or ""
+                if st.inflight >= st.cap or ats_inflight.get(ats, 0) >= ATS_CONCURRENCY.get(ats, workers):
                     i += 1
                 elif now < st.next_ok:
                     soonest = st.next_ok if soonest is None else min(soonest, st.next_ok)
@@ -206,6 +214,7 @@ def fetch_concurrently(
                 else:
                     pending.pop(i)
                     st.inflight += 1
+                    ats_inflight[ats] = ats_inflight.get(ats, 0) + 1
                     st.next_ok = now + uniform(dmin, dmax) * st.mult
                     running[pool.submit(work, company)] = (idx, company, h)
 
@@ -223,6 +232,7 @@ def fetch_concurrently(
             for fut in done:
                 idx, company, h = running.pop(fut)
                 hosts[h].inflight -= 1
+                ats_inflight[company.ats or ""] -= 1
                 jobs, local, secs, exc = fut.result()
                 errs = list(local)
                 if exc is not None:

@@ -219,13 +219,16 @@ cron only reads `origin/main`; it does not deploy (still `git pull` on the VM af
 
 Scans fetch up to `politeness.max_workers` companies at once, but never more than
 `politeness.per_host_concurrency` per API host (all Greenhouse companies share one host, each Workday
-tenant has its own). The `company_delay_min..max` pause applies per host. A 429 slows that host for the
+tenant has its own). Eightfold companies are also capped at 3 at once across all their hosts
+(`scheduler.ATS_CONCURRENCY`), since Eightfold may limit all its tenants together. The
+`company_delay_min..max` pause applies per host. A 429 slows that host for the
 rest of the scan (1 in flight, pause doubled); `breaker_threshold` (3) consecutive 429/403 answers trip
 its circuit breaker: its remaining companies are skipped this scan and tried first on the next one.
 
 **Early warning, then a per-company halt.** A host that answers 429 while retries still get through
-pings #jobhunt-admin with "Close to a rate limit" (host, 429 count, its companies), at most once per host
-per 24 h (`logs/rate_warnings.json`). A company whose fetch fails on 429 is **halted** without a ping:
+pings #jobhunt-admin with "Close to a rate limit" (host, 429 count, its companies) when it answered
+3+ 429s in one scan or 429s in two scans in a row (`logs/rate_last_429.json`); one or two 429s a retry
+fixed stay quiet. At most once per host per 24 h (`logs/rate_warnings.json`). A company whose fetch fails on 429 is **halted** without a ping:
 it goes into `logs/halted_companies.json` and every later scan skips that company only; other companies,
 on the same host too, keep polling. Review, change what is needed (below), then
 `jobhunt halted resume "NAME"`. `jobhunt halted list` shows what is halted.

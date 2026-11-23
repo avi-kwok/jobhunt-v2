@@ -30,6 +30,7 @@ def _env(monkeypatch, secret_key, tmp_path):
 
     monkeypatch.setattr(cli, "HALTED_PATH", tmp_path / "halted_companies.json")
     monkeypatch.setattr(cli, "RATE_WARN_PATH", tmp_path / "rate_warnings.json")
+    monkeypatch.setattr(cli, "RATE_LAST_429_PATH", tmp_path / "rate_last_429.json")
 
 
 @pytest.fixture(

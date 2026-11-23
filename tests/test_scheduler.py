@@ -106,6 +106,18 @@ def test_per_host_cap_never_exceeded(conn):
     assert rep.scanned == 14 and not rep.deferred
 
 
+def test_eightfold_companies_capped_across_hosts(conn):
+    probe = Probe(sleep=0.03)
+    companies = [CompanyConfig(name=f"e{i}", ats="eightfold", slug=f"e{i}.com", host=f"e{i}.example")
+                 for i in range(8)] + [co(f"g{i}") for i in range(4)]
+    _, _, rep = run(conn, pol(max_workers=8), companies, probe)
+    starts = sorted((t, h) for h, ts in probe.starts.items() for t in ts if h.endswith(".example"))
+    # Each fetch lasts 0.03 s; count how many Eightfold fetches had started within that window.
+    peak = max(sum(1 for u, _ in starts if t - 0.025 < u <= t) for t, _ in starts)
+    assert peak == scheduler.ATS_CONCURRENCY["eightfold"] and rep.scanned == 12
+    assert probe.max_all > 3  # other companies still ran alongside
+
+
 def test_cap_one_is_strictly_sequential_per_host(conn):
     probe = Probe(sleep=0.01)
     run(conn, pol(per_host_concurrency=1), [co(f"g{i}") for i in range(6)], probe)

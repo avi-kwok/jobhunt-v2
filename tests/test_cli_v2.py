@@ -281,7 +281,7 @@ def test_rate_limit_warns_before_and_halts_only_the_limited_company(tmp_path, mo
     host = "api.smartrecruiters.com"
     seen: list[list[str]] = []
     plan = iter([
-        ({host: {"429": 2}}, None),  # scan 1: 429s, retries got through -> warning only
+        ({host: {"429": 3}}, None),  # scan 1: 3 429s, retries got through -> warning only
         ({host: {"429": 5}}, None),  # scan 2: same, within 24 h -> no second warning
         ({host: {"429": 9}}, "HTTP 429"),  # scan 3: first company's fetch fails -> halted
         ({}, None),  # scan 4: that company skipped, the rest of the host still polled
@@ -314,6 +314,29 @@ def test_rate_limit_warns_before_and_halts_only_the_limited_company(tmp_path, mo
     assert runner.invoke(cli.app, ["halted", "resume", limited]).exit_code == 0
     assert json.loads(cli.HALTED_PATH.read_text()) == {}
     assert runner.invoke(cli.app, ["halted", "resume", limited]).exit_code == 1
+
+
+def test_rate_warning_skips_one_off_429s_but_flags_repeats(tmp_path, monkeypatch):
+    import respx
+
+    host = "api.smartrecruiters.com"
+    plan = iter([{host: {"429": 1}}, {}, {host: {"429": 2}}, {host: {"429": 1}}])
+
+    def fake_ingest(cfg, conn, errors, companies, report=None, **k):
+        report.hosts, report.companies = next(plan), []
+        return []
+
+    monkeypatch.setattr(cli.pipeline, "ingest", fake_ingest)
+    monkeypatch.setenv("ADMIN_WEBHOOK_URL", hook_url(9))
+    args = ["scan", "--db", str(tmp_path / "scan.db"), "--force", "--no-jitter", "--no-notify"]
+    with respx.mock() as m:
+        admin = m.post(url__regex=r".*/api/webhooks/0+9/.*").respond(204)
+        counts = []
+        for _ in range(4):  # 1 x 429; clean; 2 x 429; 1 x 429 again (second scan in a row)
+            assert runner.invoke(cli.app, args).exit_code == 0
+            counts.append(admin.call_count)
+    assert counts == [0, 0, 0, 1]
+    assert "previous scan: 2 x 429" in admin.calls[0].request.content.decode()
 
 
 def test_updates_send_posts_each_new_note_once_from_a_git_ref(tmp_path, monkeypatch):

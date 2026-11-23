@@ -49,6 +49,8 @@ HALTED_PATH = LOGS_DIR / "halted_companies.json"
 # Last early-warning ping per host: a host answering 429 that we still got through
 # (retries worked) pings #jobhunt-admin at most once per RATE_WARN_COOLDOWN.
 RATE_WARN_PATH = LOGS_DIR / "rate_warnings.json"
+RATE_LAST_429_PATH = LOGS_DIR / "rate_last_429.json"  # hosts that answered 429 in the previous scan
+RATE_WARN_MIN_429 = 3  # one or two 429s a retry fixed are noise, unless they repeat next scan
 RATE_WARN_COOLDOWN = timedelta(hours=24)
 
 
@@ -983,7 +985,8 @@ def _admin_status(title: str, fields: list[tuple[str, str]], color: int) -> bool
 
 def _rate_limit_followup(report: scheduler.ScanReport, companies: list, halted: dict) -> None:
     """Halt (silently) each company whose fetch failed on 429; warn admin about hosts that
-    answered 429 but still served us, before any of their companies gets halted."""
+    answered 429 but still served us, before any of their companies gets halted. A warning
+    needs RATE_WARN_MIN_429+ 429s in one scan, or 429s in two scans in a row."""
     now = datetime.now(timezone.utc)
     failed = {c["name"]: c["host"] for c in report.companies if c.get("error") == "HTTP 429"}
     if failed:
@@ -992,11 +995,14 @@ def _rate_limit_followup(report: scheduler.ScanReport, companies: list, halted: 
         _write_json(HALTED_PATH, halted)
         console.print(f"[yellow]Rate limited, halted until resumed: {', '.join(failed)}[/]")
     warned = _read_json(RATE_WARN_PATH)
+    last = _read_json(RATE_LAST_429_PATH)
+    now_429 = {h: int(c.get("429", 0)) for h, c in report.hosts.items() if int(c.get("429", 0))}
+    if now_429 != last:
+        _write_json(RATE_LAST_429_PATH, now_429)
     sent = False
-    for host, counts in sorted(report.hosts.items()):
-        n429 = int(counts.get("429", 0))
+    for host, n429 in sorted(now_429.items()):
         names = [c.name for c in companies if scheduler.host_key(c) == host and c.name not in failed]
-        if not n429 or not names:
+        if not names or (n429 < RATE_WARN_MIN_429 and host not in last):
             continue
         try:
             recent = now - datetime.fromisoformat(warned.get(host, "")) < RATE_WARN_COOLDOWN
@@ -1006,7 +1012,8 @@ def _rate_limit_followup(report: scheduler.ScanReport, companies: list, halted: 
             continue
         if _admin_status(f"⚠️ Close to a rate limit: {host}", [
             ("Host", host),
-            ("This scan", f"{n429} x 429, retries still got through"),
+            ("This scan", f"{n429} x 429, retries still got through"
+                          + (f" (previous scan: {last[host]} x 429)" if host in last else "")),
             ("Companies", ", ".join(names)[:1024]),
             ("If it gets worse", "A company whose fetch fails on 429 is skipped until you run "
                                  "`jobhunt halted resume NAME`. Other companies keep polling."),
