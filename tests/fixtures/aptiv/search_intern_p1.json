@@ -1,0 +1,78 @@
+{
+  "Keyword": "intern",
+  "Success": true,
+  "Pagination": {
+    "NofResults": 3,
+    "CurrentPage": 1,
+    "MaxPerPage": 96,
+    "NofPages": 2
+  },
+  "Results": [
+    {
+      "DocId": "J000705140",
+      "Score": 34.253857,
+      "Document": {
+        "title": [
+          "Student Engineer"
+        ],
+        "link": [
+          "https://www.aptiv.com/en/jobs/search/open-positions/J000705140"
+        ],
+        "primarylocation": [
+          "Gothenburg, Vastmanland County, Sweden"
+        ],
+        "primarycity": [
+          "Gothenburg"
+        ],
+        "primarystate": [
+          "Vastmanland County"
+        ],
+        "primarycountry": [
+          "Sweden"
+        ],
+        "jobfamily": [
+          "Administration Support & Service"
+        ],
+        "created_moment": [
+          "2026-09-29T01:40:27.172-07:00"
+        ],
+        "jobdescription": [
+          "<p style=\"color:!important\"><span style=\"color:#000000\"><b>Student Engineer </b></span></p><br /><p><b><span style=\"font-size:inherit\">Aptiv Gothenburg Student Engineer Initiative</span></b></p><p><span style=\"font-size:inherit\">Each year, we welcome several Student Engineers to join our team in Got"
+        ]
+      }
+    },
+    {
+      "DocId": "J000704404",
+      "Score": 34.17278,
+      "Document": {
+        "title": [
+          "Finance Intern"
+        ],
+        "link": [
+          "https://www.aptiv.com/en/jobs/search/open-positions/J000704404"
+        ],
+        "primarylocation": [
+          "Troy, Michigan, United States"
+        ],
+        "primarycity": [
+          "Troy"
+        ],
+        "primarystate": [
+          "Michigan"
+        ],
+        "primarycountry": [
+          "United States"
+        ],
+        "jobfamily": [
+          "Finance Support / Administration"
+        ],
+        "created_moment": [
+          "2026-09-17T12:01:21.202-07:00"
+        ],
+        "jobdescription": [
+          "<p><b>Finance Internship Program</b></p><p></p><p>Why join Aptiv? You&#39;ll have the opportunity to work on cutting-edge applications, develop breakthrough technologies, and deliver innovative solutions to some of the world\u2019s leading automotive brands. See your work come to life on the road\u2014helping"
+        ]
+      }
+    }
+  ]
+}

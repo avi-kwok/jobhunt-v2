@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Companies - jobhunt{% endblock %}
+{% block body %}
+<h1>Companies</h1>
+<p class="muted">Press Ctrl + F (Cmd + F on a Mac) and type a company to find it! If it's not on here, fill out the <a href="/feedback">feedback form</a> to let me know so I can add it.</p>
+<h2>New (last {{ new_days }} days)</h2>
+{% if new %}<p>{{ new|join(", ") }}</p>{% else %}<p class="muted">None right now.</p>{% endif %}
+<h2>Every company we track ({{ tracked|length }})</h2>
+<p class="muted">{{ tracked|join(", ") }}</p>
+<h2>Companies we can't track</h2>
+<p>These companies' career sites block automated access, have no public job feed, or are too slow to scan, so jobhunt can't check them directly. Their roles only reach you if they appear on the community-run SimplifyJobs internship list, which can lag behind. Check their career sites yourself.</p>
+<p class="muted">1QBit, Altera, Arcurve, Bolt Financial, Citadel, Citadel Securities, Coinsquare, CPKC, Dapper Labs, Dayforce, Definity Financial, Ecobee, Eidos-Montreal, Entrust, Etsy, Field Effect, Generac, Goldman Sachs, Google, GoTo, Helcim, Indeed, LinkedIn, MathWorks, MDA Space, Meta, Pason Systems, Perseus Group, Procore, Progressive Insurance, Rakuten Kobo, Redfin, Ross Video, SAP, Shopify, Tesla, The Co-operators, The Home Depot Canada, TikTok, Uber, UBS, Walmart Global Tech, Wayfair</p>
+{% endblock %}

@@ -5,13 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>{% block title %}jobhunt{% endblock %}</title>
-<link rel="stylesheet" href="/static/style.css">
-<script defer src="/_vercel/insights/script.js"></script>
+<link rel="stylesheet" href="/static/style.css?v={{ css_v }}">
+{% if request.url.path != "/manage" %}<script defer src="/_vercel/insights/script.js"></script>{% endif %}{# the manage URL holds the secret token: keep it out of analytics #}
 </head>
 <body>
+<header class="site"><nav>
+<a class="brand" href="/">jobhunt<span>.</span></a>
+<span class="links">{% for href, label in [("/companies", "Companies"), ("/faq", "FAQ"), ("/feedback", "Feedback"), ("/privacy", "Privacy"), ("/terms", "Terms")] %}<a href="{{ href }}"{% if request.url.path == href %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}<a class="star" href="https://github.com/avi-kwok/jobhunt-v2">★ Star on GitHub</a></span>
+</nav></header>
 <main>
 {% block body %}{% endblock %}
-<footer class="muted"><a href="/">Home</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/feedback">Feedback</a></footer>
+<footer class="muted">Built by <a href="https://avikwok.dev">Avidan Kwok</a></footer>
 </main>
 </body>
 </html>

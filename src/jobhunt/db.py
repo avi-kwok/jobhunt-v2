@@ -19,7 +19,7 @@ from .classify import Classification
 from .models import Job
 
 DEFAULT_DB_PATH = Path("jobhunt_v2.db")
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 PENDING_RETRY_AFTER = timedelta(hours=1)
 MAX_FAIL_CYCLES = 5
 RETENTION_DAYS = 90
@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS subscribers (
     fail_count          INTEGER NOT NULL DEFAULT 0,
     verify_count        INTEGER NOT NULL DEFAULT 0,
     verify_window_start TEXT,
-    grad_date           TEXT
+    grad_date           TEXT,
+    updates_opt_out     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS deliveries (
@@ -102,13 +103,18 @@ CREATE TABLE IF NOT EXISTS feedback (
     improve    TEXT NOT NULL DEFAULT '',
     features   TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 _SCHEMA_SQLITE = _TABLES.format(ID_COL="INTEGER PRIMARY KEY", SUB_FK="INTEGER")
 _SCHEMA_PG = _TABLES.format(
     ID_COL="BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY", SUB_FK="BIGINT"
 )
-DATA_TABLES = ("feedback", "rate_limits", "deliveries", "subscribers", "posting_tags", "postings")
+DATA_TABLES = ("meta", "feedback", "rate_limits", "deliveries", "subscribers", "posting_tags", "postings")
 
 
 def utcnow_iso() -> str:
@@ -251,6 +257,15 @@ def _migrate(conn: Conn) -> None:
         if "grad_date" not in cols:
             conn.execute("ALTER TABLE subscribers ADD COLUMN grad_date TEXT")
     # v4 -> v5: feedback table only (created by the IF NOT EXISTS above).
+    # v5 -> v6: meta table (created by the IF NOT EXISTS above) and subscribers.updates_opt_out (1 = skip `jobhunt broadcast` announcements).
+    if conn.is_postgres:
+        conn.execute(
+            "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS updates_opt_out INTEGER NOT NULL DEFAULT 0"
+        )
+    else:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(subscribers)").fetchall()}
+        if "updates_opt_out" not in cols:
+            conn.execute("ALTER TABLE subscribers ADD COLUMN updates_opt_out INTEGER NOT NULL DEFAULT 0")
 
 
 def schema_version(conn: Conn) -> int:
@@ -460,11 +475,12 @@ class Subscriber:
     last_ok_at: str | None = None
     fail_count: int = 0
     grad_date: str | None = None
+    updates_opt_out: bool = False
 
 
 _SUB_COLS = (
     "id, status, countries, levels, webhook_enc, created_at, activated_at, "
-    "disabled_reason, last_ok_at, fail_count, grad_date"
+    "disabled_reason, last_ok_at, fail_count, grad_date, updates_opt_out"
 )
 
 
@@ -475,6 +491,7 @@ def _sub_from_row(r) -> Subscriber:
         created_at=r["created_at"], activated_at=r["activated_at"],
         disabled_reason=r["disabled_reason"], last_ok_at=r["last_ok_at"],
         fail_count=r["fail_count"], grad_date=r["grad_date"],
+        updates_opt_out=bool(r["updates_opt_out"]),
     )
 
 
@@ -575,6 +592,25 @@ def set_prefs(conn: Conn, sub_id: int, countries: list[str], levels: list[str]) 
 def set_grad_date(conn: Conn, sub_id: int, grad_date: str | None) -> None:
     conn.execute("UPDATE subscribers SET grad_date=? WHERE id=?", (grad_date, sub_id))
     conn.commit()
+
+
+def set_updates_opt_out(conn: Conn, sub_id: int, opt_out: bool) -> None:
+    conn.execute("UPDATE subscribers SET updates_opt_out=? WHERE id=?", (int(opt_out), sub_id))
+    conn.commit()
+
+
+# ---- meta (small key/value facts, e.g. last_scan_at shown on the home page) -------------
+
+
+def set_meta(conn: Conn, key: str, value: str) -> None:
+    conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) "
+                 "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
+    conn.commit()
+
+
+def get_meta(conn: Conn, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else None
 
 
 def pause_subscriber(conn: Conn, sub_id: int) -> bool:

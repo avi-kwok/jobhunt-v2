@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import subprocess
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -42,6 +43,13 @@ CRON_LOG_PATH = LOGS_DIR / "worker.log"
 # shell opens the redirect before running the command), so a stale
 # mtime is the reliable "the box/scheduler is dead" signal.
 CRON_STALE_MINUTES = 90
+# Companies whose fetch failed on HTTP 429. Scans skip them until an admin runs
+# `jobhunt halted resume NAME`. Other companies, same host included, keep polling.
+HALTED_PATH = LOGS_DIR / "halted_companies.json"
+# Last early-warning ping per host: a host answering 429 that we still got through
+# (retries worked) pings #jobhunt-admin at most once per RATE_WARN_COOLDOWN.
+RATE_WARN_PATH = LOGS_DIR / "rate_warnings.json"
+RATE_WARN_COOLDOWN = timedelta(hours=24)
 
 
 def _write_last_run_marker(
@@ -248,6 +256,14 @@ def scan(
     # Companies the previous scan could not get to (deadline / rate-limit breaker) go first.
     prev = _read_last_run() or {}
     resolved = pipeline.deferred_first(resolved, prev.get("deferred") or [])
+    halted = _read_json(HALTED_PATH)
+    held = [c.name for c in resolved if c.name in halted]
+    if held:
+        resolved = [c for c in resolved if c.name not in halted]
+        console.print(
+            f"[yellow]Rate-limit halt: skipping {', '.join(held)}. "
+            "Run `jobhunt halted resume NAME` after review.[/]"
+        )
 
     # Cheap .env protections (perms, not git-tracked). No API key is needed.
     if not seed:
@@ -296,6 +312,8 @@ def scan(
         new_jobs = pipeline.ingest(
             cfg, conn, errors, resolved, report=report, deadline_seconds=deadline or None
         )
+        _rate_limit_followup(report, resolved, halted)
+        v2db.set_meta(conn, "last_scan_at", v2db.utcnow_iso())  # home page "Last checked"
         tiebreak = _make_tiebreak(cfg)
         classified = pipeline.classify_new(cfg, conn, new_jobs, tiebreak)
         # postings pushed via POST /ingest/posting
@@ -659,6 +677,9 @@ def subscriber_remove(
     console.print(f"Removed subscriber {sub_id}.")
 
 
+BROADCAST_FOOTER = "Job alerts only? Untick jobhunt updates on your manage page."
+
+
 @app.command()
 def broadcast(
     message_file: Path = typer.Argument(..., exists=True, dir_okay=False,
@@ -669,7 +690,7 @@ def broadcast(
     yes: bool = typer.Option(False, "--yes", help="Required to send to every active subscriber."),
     db_path: str = typer.Option(None, "--db", help=DB_HELP),
 ) -> None:
-    """Post one announcement embed to active subscribers (all, or --to ids)."""
+    """Post one announcement embed to active subscribers (all, or --to ids) not opted out of updates."""
     text = message_file.read_text(encoding="utf-8").strip()
     if not text or len(text) > 4096:  # Discord embed description limit
         console.print("[red]Message must be 1-4096 characters.[/]")
@@ -678,7 +699,8 @@ def broadcast(
         console.print("[red]--title must be at most 256 characters.[/]")
         raise typer.Exit(2)
     try:
-        embed = {"description": text, "color": int(color.removeprefix("#").removeprefix("0x"), 16)}
+        embed = {"description": text, "color": int(color.removeprefix("#").removeprefix("0x"), 16),
+                 "footer": {"text": BROADCAST_FOOTER}}
         if title.strip():
             embed["title"] = title.strip()
     except ValueError:
@@ -693,23 +715,83 @@ def broadcast(
         missing = sorted(set(to or []) - {s.id for s in subs})
         if missing:
             console.print(f"[yellow]Not active, skipped: {missing}[/]")
-        sent, failed = 0, []
-        for s in subs:
-            try:
-                hook = webhooks.parse(crypto.decrypt_url(s.webhook_enc))
-                DiscordNotifier(hook.url).send_embeds([embed])
-                sent += 1
-            except Exception as exc:  # noqa: BLE001 - one bad webhook must not stop the rest
-                failed.append(s.id)
-                console.print(f"[red]subscriber {s.id}: {escape(security.redact(str(exc)))}[/]")
-                if isinstance(exc, DiscordHTTPError) and exc.status_code in (401, 404):
-                    v2db.disable_subscriber(
-                        conn, s.id, f"discord webhook returned {exc.status_code} (deleted/invalid)")
+        opted_out = [s.id for s in subs if s.updates_opt_out]
+        if opted_out:
+            console.print(f"[yellow]Opted out of updates, skipped: {opted_out}[/]")
+        subs = [s for s in subs if not s.updates_opt_out]
+        sent, failed = _send_to_subscribers(conn, subs, embed)
     finally:
         conn.close()
     console.print(f"Broadcast sent to {sent} subscriber(s); failed: {failed or 'none'}.")
     if failed:
         raise typer.Exit(1)
+
+
+def _send_to_subscribers(conn, subs, embed: dict) -> tuple[int, list[int]]:
+    """Post one embed to each subscriber; disables webhooks Discord says are gone."""
+    sent, failed = 0, []
+    for s in subs:
+        try:
+            hook = webhooks.parse(crypto.decrypt_url(s.webhook_enc))
+            DiscordNotifier(hook.url).send_embeds([embed])
+            sent += 1
+        except Exception as exc:  # noqa: BLE001 - one bad webhook must not stop the rest
+            failed.append(s.id)
+            console.print(f"[red]subscriber {s.id}: {escape(security.redact(str(exc)))}[/]")
+            if isinstance(exc, DiscordHTTPError) and exc.status_code in (401, 404):
+                v2db.disable_subscriber(
+                    conn, s.id, f"discord webhook returned {exc.status_code} (deleted/invalid)")
+    return sent, failed
+
+
+# ---- update notes: one updates/<YYYY-MM-DD>-<slug>.md per user-facing push ----------
+
+UPDATES_DIR = "updates"
+UPDATES_SENT_PATH = LOGS_DIR / "updates_sent.json"
+UPDATES_MAX_AGE = timedelta(days=3)  # a lost sent-log must not resend old notes
+UPDATES_TITLE = "What's new in jobhunt"
+updates_app = typer.Typer(help="Tell subscribers what changed after a push.", no_args_is_help=True)
+app.add_typer(updates_app, name="updates")
+
+
+def _update_notes(ref: str | None) -> dict[str, str]:
+    """{file name: text} of updates/*.md, from git REF (e.g. origin/main) or the working tree."""
+    if ref is None:
+        folder = Path(UPDATES_DIR)
+        return {f.name: f.read_text(encoding="utf-8") for f in sorted(folder.glob("*.md"))}
+    git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True, check=True).stdout  # noqa: E731
+    names = [n.rsplit("/", 1)[-1] for n in git("ls-tree", "--name-only", ref, f"{UPDATES_DIR}/").split()]
+    return {n: git("show", f"{ref}:{UPDATES_DIR}/{n}") for n in sorted(names) if n.endswith(".md")}
+
+
+@updates_app.command("send")
+def updates_send(
+    ref: str = typer.Option(None, "--ref", help="Read notes from this git ref (the VM cron uses origin/main)."),
+    db_path: str = typer.Option(None, "--db", help=DB_HELP),
+) -> None:
+    """Send each update note not sent yet to active subscribers who did not opt out of updates."""
+    if _in_quiet_hours(load_config().schedule):
+        return  # held until morning; the cron retries
+    done = _read_json(UPDATES_SENT_PATH)
+    oldest = (datetime.now(timezone.utc) - UPDATES_MAX_AGE).strftime("%Y-%m-%d")
+    todo = {n: t.strip() for n, t in _update_notes(ref).items() if n not in done and n[:10] >= oldest}
+    if not todo:
+        return
+    conn = v2db.connect(db_path)
+    try:
+        subs = [s for s in v2db.list_active_subscribers(conn) if not s.updates_opt_out]
+        for name, text in todo.items():
+            if not 1 <= len(text) <= 4096:
+                console.print(f"[red]{name}: must be 1-4096 characters, not sent.[/]")
+                continue
+            embed = {"title": UPDATES_TITLE, "description": text, "color": 0x2ECC71,
+                     "footer": {"text": BROADCAST_FOOTER}}
+            sent, failed = _send_to_subscribers(conn, subs, embed)
+            done[name] = datetime.now(timezone.utc).isoformat()  # never resend, even on partial failure
+            _write_json(UPDATES_SENT_PATH, done)
+            console.print(f"{name}: sent to {sent} subscriber(s); failed: {failed or 'none'}.")
+    finally:
+        conn.close()
 
 
 feedback_app = typer.Typer(help="Read feedback from the web form (admin).", no_args_is_help=True)
@@ -871,6 +953,99 @@ def _relative_time(then: datetime | None, now: datetime | None = None) -> str:
     return f"{days} day ago" if days == 1 else f"{days} days ago"
 
 
+def _read_json(path: Path) -> dict:
+    """A small JSON state file as a dict; missing or corrupt reads as empty."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_json(path: Path, data: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2))
+    except OSError as exc:  # state is best-effort; never abort a scan over it
+        console.print(f"[red]Could not save {path}:[/] {escape(str(exc))}")
+
+
+def _admin_status(title: str, fields: list[tuple[str, str]], color: int) -> bool:
+    """Best-effort status embed to #jobhunt-admin. False if unset/invalid or the post failed."""
+    try:
+        admin = webhooks.parse(os.environ.get("ADMIN_WEBHOOK_URL", ""))
+        DiscordNotifier(admin.url).send_status(title, fields, color)
+        return True
+    except Exception as exc:  # noqa: BLE001 - a warning must never break the scan
+        console.print(f"[yellow]Admin ping not sent:[/] {escape(security.redact(str(exc)))}")
+        return False
+
+
+def _rate_limit_followup(report: scheduler.ScanReport, companies: list, halted: dict) -> None:
+    """Halt (silently) each company whose fetch failed on 429; warn admin about hosts that
+    answered 429 but still served us, before any of their companies gets halted."""
+    now = datetime.now(timezone.utc)
+    failed = {c["name"]: c["host"] for c in report.companies if c.get("error") == "HTTP 429"}
+    if failed:
+        for name, host in failed.items():
+            halted[name] = {"since": now.isoformat(), "host": host}
+        _write_json(HALTED_PATH, halted)
+        console.print(f"[yellow]Rate limited, halted until resumed: {', '.join(failed)}[/]")
+    warned = _read_json(RATE_WARN_PATH)
+    sent = False
+    for host, counts in sorted(report.hosts.items()):
+        n429 = int(counts.get("429", 0))
+        names = [c.name for c in companies if scheduler.host_key(c) == host and c.name not in failed]
+        if not n429 or not names:
+            continue
+        try:
+            recent = now - datetime.fromisoformat(warned.get(host, "")) < RATE_WARN_COOLDOWN
+        except ValueError:
+            recent = False
+        if recent:
+            continue
+        if _admin_status(f"⚠️ Close to a rate limit: {host}", [
+            ("Host", host),
+            ("This scan", f"{n429} x 429, retries still got through"),
+            ("Companies", ", ".join(names)[:1024]),
+            ("If it gets worse", "A company whose fetch fails on 429 is skipped until you run "
+                                 "`jobhunt halted resume NAME`. Other companies keep polling."),
+        ], 0xF1C40F):
+            warned[host], sent = now.isoformat(), True
+    if sent:
+        _write_json(RATE_WARN_PATH, warned)
+
+
+halted_app = typer.Typer(help="Companies halted after a rate limit (admin).", no_args_is_help=True)
+app.add_typer(halted_app, name="halted")
+
+
+@halted_app.command("list")
+def halted_list() -> None:
+    """Companies scans currently skip after their fetch failed on HTTP 429."""
+    halted = _read_json(HALTED_PATH)
+    if not halted:
+        console.print("No halted companies.")
+        return
+    table = Table(title="Halted companies")
+    for col in ("Company", "Host", "Since (UTC)"):
+        table.add_column(col)
+    for name, info in sorted(halted.items()):
+        table.add_row(escape(name), str(info.get("host", "")), str(info.get("since", ""))[:16])
+    console.print(table)
+
+
+@halted_app.command("resume")
+def halted_resume(name: str = typer.Argument(..., help="Company name exactly as `jobhunt halted list` shows it.")) -> None:
+    """Let the next scan poll this company again."""
+    halted = _read_json(HALTED_PATH)
+    if halted.pop(name, None) is None:
+        console.print(f"[red]{escape(name)} is not halted.[/]")
+        raise typer.Exit(1)
+    _write_json(HALTED_PATH, halted)
+    console.print(f"Resumed {escape(name)}; the next scan polls it again.")
+
+
 def _read_last_run(path: Path | None = None) -> dict | None:
     """Read logs/last_run.json, tolerating a missing or corrupt file."""
     path = path if path is not None else LAST_RUN_PATH
@@ -981,6 +1156,7 @@ def heartbeat(
         rate_text = "n/a"
     if tripped:
         status_text += f" (rate limit breaker tripped: {', '.join(tripped)})"
+    halted = sorted(_read_json(HALTED_PATH))
 
     fields = [
         ("Status", status_text),
@@ -994,10 +1170,11 @@ def heartbeat(
         ("Deliveries sent (24h)", str(counts["sent_24h"])),
         ("Deliveries failed (24h)", str(counts["failed_24h"])),
         ("Rate limits (last scan)", rate_text),
+        ("Halted (rate limited)", ", ".join(halted)[:1024] or "none"),
         ("LLM tie-break (today)", _llm_line(_llm_today(cfg))),
     ]
 
-    if healthy and tripped:
+    if healthy and (tripped or halted):
         title, color = "🟡 jobhunt heartbeat — rate limited", 0xF1C40F
     elif healthy:
         title, color = "🟢 jobhunt heartbeat", 0x2ECC71

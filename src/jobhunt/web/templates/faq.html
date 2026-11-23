@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}FAQ - jobhunt{% endblock %}
+{% block body %}
+<h1>FAQ</h1>
+
+<h2>How fast do alerts arrive?</h2>
+<p>jobhunt checks every tracked company about every 30 minutes, day and night. Most alerts arrive within an hour of a role going up.</p>
+
+<h2>Why didn't I get an alert for a role?</h2>
+<ul>
+<li>The company isn't tracked. Check the <a href="/companies">companies page</a>.</li>
+<li>It's outside your filters: country, level or graduation date.</li>
+<li>The title isn't software engineering or close to it.</li>
+<li>It went up before you subscribed, or more than about a day and a half before jobhunt saw it.</li>
+</ul>
+
+<h2>Two alerts have the same title. Is that a repeat?</h2>
+<p>No. A different Job ID means a separate opening, often in a different city or team.</p>
+
+<h2>How do I change my settings or stop alerts?</h2>
+<p>Open the manage link from the confirmation message in your Discord channel. Lost it? Enter the same webhook on the <a href="/">home page</a> and a new link is posted in your channel. Your settings stay the same.</p>
+
+<h2>Is it free? What do you store?</h2>
+<p>It's free. jobhunt stores your webhook URL (encrypted) and your preferences. See the <a href="/privacy">privacy page</a>.</p>
+
+<h2>Can you add a company?</h2>
+<p>Yes. Tell me through the <a href="/feedback">feedback form</a>.</p>
+{% endblock %}

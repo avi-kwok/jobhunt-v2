@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -61,6 +61,8 @@ class CompanyConfig(BaseModel):
     # Subsidiary whose postings already arrive under this parent company's board.
     # Counted as covered (not unresolved) and never fetched on its own.
     covered_by: str | None = None
+    # Date first tracked; the public /companies page lists recent ones as new.
+    added: date | None = None
     # simplify (pseudo-company only): canonical names of in-scope companies with no ATS
     # and no covered_by; computed by the config loader, never hand-edited.
     simplify_companies: list[str] | None = None

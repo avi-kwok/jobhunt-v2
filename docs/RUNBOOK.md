@@ -130,7 +130,7 @@ pg_dump --version
 ```
 
 8. Confirm cron: `crontab -l` shows a block between `# BEGIN jobhunt-v2` and `# END jobhunt-v2`:
-   scan every 30 min, heartbeat daily 16:00 UTC, backup daily 09:00 UTC.
+   scan every 30 min, heartbeat daily 16:00 UTC, backup daily 09:00 UTC, update notes every 10 min.
    After 30 minutes `tail ~/jobhunt-v2/logs/worker.log` shows a scan.
 
 ## 5. Subscribe your own channel
@@ -205,6 +205,16 @@ Off by default. Web (Vercel) env only; the worker needs nothing.
 - Ingested postings are stored untagged (`source = muse-pipeline`); the next worker scan classifies
   them (up to 500 per scan) and delivers matches. Nothing delivers until the worker runs.
 
+## Update notes (what subscribers hear after a push)
+
+Every push with a user-visible change adds `updates/YYYY-MM-DD-<slug>.md`: a short plain-language
+list (max 4096 characters, Discord markdown), dated the day it is pushed. Every 10 minutes the VM cron
+runs `git fetch` and `jobhunt updates send --ref origin/main`, which posts each note it has not sent
+yet as a green "What's new in jobhunt" embed to active subscribers who did not untick "jobhunt
+updates" on /manage. Sent names are kept in `logs/updates_sent.json`; notes dated more than 3 days
+back are never sent, so a lost log cannot resend history. Nothing is sent during quiet hours. The
+cron only reads `origin/main`; it does not deploy (still `git pull` on the VM after a push).
+
 ## 9. Rate limits: how to tell and what to do
 
 Scans fetch up to `politeness.max_workers` companies at once, but never more than
@@ -212,13 +222,21 @@ Scans fetch up to `politeness.max_workers` companies at once, but never more tha
 tenant has its own). The `company_delay_min..max` pause applies per host. A 429 slows that host for the
 rest of the scan (1 in flight, pause doubled); `breaker_threshold` (3) consecutive 429/403 answers trip
 its circuit breaker: its remaining companies are skipped this scan and tried first on the next one.
+
+**Early warning, then a per-company halt.** A host that answers 429 while retries still get through
+pings #jobhunt-admin with "Close to a rate limit" (host, 429 count, its companies), at most once per host
+per 24 h (`logs/rate_warnings.json`). A company whose fetch fails on 429 is **halted** without a ping:
+it goes into `logs/halted_companies.json` and every later scan skips that company only; other companies,
+on the same host too, keep polling. Review, change what is needed (below), then
+`jobhunt halted resume "NAME"`. `jobhunt halted list` shows what is halted.
 `Retry-After` (seconds or date, capped at 60 s) is always honored.
 
 **How to tell**
 - **Dashboard** (section 7): "Last scan" (duration, scanned/deferred/errored, breaker-tripped hosts) and the
   "Hosts" table (requests, 429, 403, 5xx, retries, Retry-After honored, breaker skips), plus the slowest companies.
-- **Heartbeat**: field "Rate limits (last scan)" = total 429/403 and tripped hosts; the heartbeat turns yellow
-  (🟡) when any host tripped its breaker. Red still means the scheduler is silent.
+- **Heartbeat**: field "Rate limits (last scan)" = total 429/403 and tripped hosts, "Halted (rate limited)" =
+  companies waiting for `jobhunt halted resume`; the heartbeat turns yellow (🟡) when any host tripped or
+  any company is halted. Red still means the scheduler is silent.
 - **`logs/worker.log`**: a `RATE LIMIT: circuit breaker tripped for host ...` line and, if the scan hit
   `scan_deadline_seconds`, a `SCAN DEADLINE ... deferred` line. Raw numbers: `logs/last_run.json`.
 
@@ -226,7 +244,7 @@ its circuit breaker: its remaining companies are skipped this scan and tried fir
 - A few 429s but no trips: usually fine. Persistent 429s on one host: lower `per_host_concurrency` (2 -> 1)
   and/or raise `company_delay_min` / `company_delay_max`.
 - Breaker trips every scan on the same host: do the above, and check that host in a browser (403 can mean a
-  block, not a limit). Deferred companies are retried first every scan, so nothing is dropped.
+  block, not a limit). A halted company's postings are missed until you resume it; Simplify may still list them.
 - Scans keep hitting the deadline (`deadline_hit` in the dashboard): raise `max_workers` (hosts differ) or lower
   the delays only if the Hosts table shows zero 429s. Keep `scan_deadline_seconds` below `timeout 1800`
   (and below `schedule.max_run_seconds` minus 2 min if that watchdog is on; the scan clamps itself).

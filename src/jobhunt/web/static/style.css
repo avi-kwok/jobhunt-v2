@@ -1,13 +1,20 @@
-:root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fafafa; --mut: #5f6368; --acc: #5865f2; --line: #d0d4da; }
-@media (prefers-color-scheme: dark) { :root { --fg: #e8e8ea; --bg: #16171a; --mut: #9aa0a6; --line: #34363c; } }
+:root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fafafa; --mut: #5f6368; --acc: #2f7a52; --on-acc: #fff; --line: #d0d4da; }
+@media (prefers-color-scheme: dark) { :root { --fg: #e8e8ea; --bg: #16171a; --mut: #9aa0a6; --line: #34363c; --acc: #5fb98a; --on-acc: #0f1a14; } }
 body { font: 16px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; }
 main { max-width: 38rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+header.site { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+header.site nav { max-width: 38rem; margin: 0 auto; padding: .8rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: .4rem 1rem; flex-wrap: wrap; }
+.brand { font-weight: 700; font-size: 1.1rem; color: var(--fg); text-decoration: none; letter-spacing: -.01em; } .brand span { color: var(--acc); }
+.links { display: flex; gap: .3rem 1.1rem; flex-wrap: wrap; font-size: .9rem; }
+.links a { color: var(--mut); text-decoration: none; } .links a:hover, .links a[aria-current] { color: var(--fg); }
+.links a.star { color: var(--acc); font-weight: 600; }
+.links a[aria-current] { text-decoration: underline; text-decoration-color: var(--acc); text-underline-offset: .3em; }
 h1 { font-size: 1.6rem; margin: 0 0 .5rem; } h2 { font-size: 1.1rem; margin-top: 1.8rem; }
 a { color: var(--acc); } .muted { color: var(--mut); font-size: .9rem; }
 form { display: grid; gap: .8rem; margin: 1rem 0; }
 fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 0; }
 input[type=text], input[type=url], textarea { width: 100%; box-sizing: border-box; padding: .6rem; font: inherit; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
-button { font: inherit; padding: .55rem 1rem; border: 0; border-radius: 6px; background: var(--acc); color: #fff; cursor: pointer; }
+button { font: inherit; padding: .55rem 1rem; border: 0; border-radius: 6px; background: var(--acc); color: var(--on-acc); cursor: pointer; }
 button.alt { background: transparent; color: var(--fg); border: 1px solid var(--line); }
 button.danger { background: #c5221f; }
 .row { display: flex; gap: .6rem; flex-wrap: wrap; }

@@ -470,8 +470,10 @@ companies:
   slug: dialpad
 - name: Disney
   priority: 4
-  ats: greenhouse
-  slug: disney
+  ats: phenom
+  slug: TWNTWDUS
+  site: global/en
+  host: join.disneycareers.com
 - name: Faire
   priority: 4
   ats: greenhouse
@@ -1369,6 +1371,11 @@ companies:
   priority: 4
   ats: rippling
   slug: rippling
+- name: Vention
+  added: 2026-11-22
+  priority: 4
+  ats: smartrecruiters
+  slug: Vention
 - name: Freshworks
   priority: 4
   ats: smartrecruiters
@@ -1841,6 +1848,11 @@ companies:
   priority: 4
   ats: successfactors
   host: jobs.canadalife.com
+- name: CN
+  added: 2026-11-22
+  priority: 4
+  ats: successfactors_sitemap
+  host: careers.cn.ca
 - name: Seagate
   priority: 4
   ats: successfactors_sitemap  # RMK Unify site: urlset sitemap + capped detail pages
@@ -2208,3 +2220,139 @@ companies:
 - name: SimplifyJobs
   ats: simplify
   priority: 4
+- name: Abercrombie & Fitch
+  added: 2026-11-22
+  priority: 4
+  ats: workday
+  tenant: abercrombie
+  wd: wd108
+  site: anf
+- name: Nike
+  added: 2026-11-22
+  priority: 4
+  ats: workday
+  tenant: nike
+  wd: wd1
+  site: nke
+- name: SentinelOne
+  added: 2026-11-22
+  priority: 2
+  ats: greenhouse
+  slug: sentinellabs
+- name: Planview
+  added: 2026-11-22
+  priority: 4
+  ats: icims
+  host: careers.planview.com
+- name: Jonas Software
+  added: 2026-11-22
+  priority: 4
+  ats: workday
+  tenant: talentmanagementsolution
+  wd: wd3
+  site: JonasSoftwareCanada
+  workday_extra_sites: [JonasSoftwareUSA]
+- name: EUNA Solutions
+  added: 2026-11-22
+  priority: 4
+  ats: bamboohr
+  slug: euna
+- name: IKO Industries
+  added: 2026-11-22
+  priority: 4
+  ats: workday
+  tenant: iko
+  wd: wd3
+  site: IKO_Careers
+- name: Questrade
+  added: 2026-11-22
+  priority: 4
+  ats: greenhouse
+  slug: questrade
+- name: GeoComply
+  added: 2026-11-22
+  priority: 4
+  ats: lever
+  slug: geocomply-2
+- name: D. E. Shaw
+  added: 2026-11-22
+  priority: 1
+  ats: deshaw
+  host: www.deshaw.com
+- name: Dynatrace
+  added: 2026-11-22
+  priority: 4
+  ats: dynatrace
+  host: www.dynatrace.com
+- name: Symbotic
+  added: 2026-11-22
+  priority: 4
+  ats: symbotic
+  host: www.symbotic.com
+- name: Aptiv
+  added: 2026-11-22
+  priority: 2
+  ats: aptiv
+  host: aptivcareers.searchapi-na.hawksearch.com
+  slug: 28fad22cfe584b879917858203dd97ce
+- name: Cogeco
+  added: 2026-11-22
+  priority: 4
+  ats: workday
+  tenant: cogeco
+  wd: wd3
+  site: Cogeco_Careers
+- name: Loblaw Companies
+  added: 2026-11-22
+  priority: 4
+  ats: paradox
+  host: careers.loblaw.ca
+- name: Calian
+  added: 2026-11-22
+  priority: 4
+  ats: calian
+  host: careers.calian.com
+- name: Descartes Systems
+  added: 2026-11-22
+  priority: 4
+  ats: descartes
+  host: careers.descartes.com
+- name: Nuclear Promise X
+  added: 2026-11-22
+  priority: 1
+  ats: ashby
+  slug: NPX
+- name: Sanctuary AI
+  added: 2026-11-22
+  priority: 4
+  ats: kula
+  host: careers.kula.ai
+  slug: sanctuary-ai
+- name: Vidyard
+  added: 2026-11-22
+  priority: 4
+  ats: kula
+  host: careers.kula.ai
+  slug: vidyard
+- name: Thrive Health
+  added: 2026-11-22
+  priority: 4
+  ats: thrivehealth
+  host: www.thrive.health
+- name: IFS
+  added: 2026-11-22
+  priority: 4
+  ats: smartrecruiters_careers
+  host: careers.smartrecruiters.com
+  slug: IFS1
+- name: Grammarly
+  added: 2026-11-22
+  priority: 1
+  ats: ashby
+  slug: Superhuman Platform Inc
+- name: ServiceNow
+  added: 2026-11-22
+  priority: 4
+  ats: smartrecruiters_careers
+  host: careers.smartrecruiters.com
+  slug: ServiceNow

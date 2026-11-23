@@ -1,0 +1,7 @@
+- **33 new companies**, including Nike, ServiceNow, CN and Grammarly. New ones and every tracked company: https://jobhunt.avikwok.dev/companies
+- **Job IDs on alerts**: same title but a different ID means a different opening.
+- **Untrackable companies list**: on the same page. Check these yourself if you're targeting one.
+- **Change your choices** (countries, levels, graduation date): open the manage link from your jobhunt confirmation message in this channel. Lost it? Enter this channel's webhook at https://jobhunt.avikwok.dev for a new link.
+- **Test alert**: a "Send me a test alert" button on your manage page checks that your channel works.
+- **FAQ**: https://jobhunt.avikwok.dev/faq
+- **Update notes like this one** whenever jobhunt changes. To stop them (new features, fixes and additions), untick "jobhunt updates" on your manage page. We suggest keeping them on: they're rare and may be important.

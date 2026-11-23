@@ -61,10 +61,11 @@ def token_from(m, n=-1):
     return re.search(r"/manage\?t=([\w-]+)", body["embeds"][0]["description"]).group(1)
 
 
-def subscribe(client, n=1, ip="1.1.1.1", countries=("CA", "US"), levels=("internship", "coop")):
+def subscribe(client, n=1, ip="1.1.1.1", countries=("CA", "US"), levels=("internship", "coop"),
+              updates="1"):
     return client.post("/subscribe", headers={"x-forwarded-for": ip},
                        data={"webhook_url": hook_url(n), "countries": list(countries),
-                             "levels": list(levels)})
+                             "levels": list(levels), "updates": updates})
 
 
 def manage(client, t, action, **extra):
@@ -82,7 +83,7 @@ def test_full_flow(client, discord, conn):
     assert len(posts(discord)) == 1
     t = token_from(discord)
     sub = row(conn)
-    assert sub.status == "pending"
+    assert sub.status == "pending" and not sub.updates_opt_out  # signup box ticked
 
     page = client.get(f"/manage?t={t}")
     assert page.status_code == 200 and "pending" in page.text
@@ -96,6 +97,9 @@ def test_full_flow(client, discord, conn):
     assert "Preferences saved" in r.text
     sub = row(conn)
     assert sub.countries == ["CA"] and sub.levels == ["coop"]
+    assert sub.updates_opt_out  # "updates" checkbox left unticked
+    manage(client, t, "update", countries=["CA"], levels=["coop"], updates="1")
+    assert not row(conn).updates_opt_out
 
     assert manage(client, t, "pause").status_code == 200 and row(conn).status == "paused"
     assert manage(client, t, "resume").status_code == 200 and row(conn).status == "active"
@@ -129,6 +133,8 @@ def test_resubscribe_identical_and_rotates(client, discord, conn):
     t2 = token_from(discord)
     assert first.text == second.text and first.status_code == second.status_code
     assert t1 != t2
+    titles = [json.loads(r.content)["embeds"][0]["title"] for r in posts(discord)]
+    assert titles == ["Activate your jobhunt alerts", "Your new jobhunt manage link"]
     assert client.get(f"/manage?t={t1}").status_code == 404
     assert manage(client, t1, "pause").status_code == 404
     assert client.get(f"/manage?t={t2}").status_code == 200
@@ -149,9 +155,11 @@ def test_invalid_urls_rejected(client, discord, bad):
     assert bad not in r.text or bad == ""
 
 
-def test_no_prefs_rejected(client, discord):
-    r = subscribe(client, countries=[], levels=["coop"])
-    assert r.status_code == 400 and not discord.calls
+def test_no_prefs_rejected(client, discord, conn):
+    for countries, levels in (([], ["coop"]), (["CA"], []), ([], [])):
+        r = subscribe(client, countries=countries, levels=levels)
+        assert r.status_code == 400 and "Pick at least one country and one level." in r.text
+    assert not discord.calls and row(conn) is None
 
 
 def test_webhook_404_rejected_generic(client, conn):
@@ -267,6 +275,7 @@ def test_disabled_resubscribe_goes_pending(client, discord, conn):
     subscribe(client, ip="3.3.3.3")
     sub = row(conn)
     assert sub.status == "pending" and sub.disabled_reason is None
+    assert json.loads(posts(discord)[-1].content)["embeds"][0]["title"] == "Activate your jobhunt alerts"
 
 
 def test_activate_then_worker_sees_subscriber(client, discord, conn):
@@ -360,6 +369,30 @@ def test_signup_page_has_grad_selects(client):
     assert 'name="grad_month"' in page and 'name="grad_year"' in page and "No filter" in page
 
 
+def test_signup_with_updates_unticked_opts_out(client, discord, conn):
+    subscribe(client, updates="")
+    assert row(conn).updates_opt_out
+
+
+def test_companies_page_lists_new_tracked_and_untrackable(client, monkeypatch):
+    import re
+    from datetime import date, timedelta
+
+    from jobhunt.web import app as web
+    tracked, added = web._tracked_companies()
+    assert len(tracked) > 400 and "SimplifyJobs" not in tracked
+    today = date.today()
+    monkeypatch.setattr(web, "_tracked_companies",
+                        lambda: (["Acme", "Old Co"], [(today, "Acme"), (today - timedelta(days=60), "Old Co")]))
+    page = client.get("/companies").text
+    new = page.split("New (last")[1].split("</h2>")[1].split("<h2>")[0]
+    assert "Acme" in new and "Old Co" not in new and "track (2)" in page
+    assert '<a href="/companies">' in client.get("/").text
+    # A company on the can't-track list must not also be tracked.
+    cant = re.search(r"can't track</h2>.*?<p class=\"muted\">(.*?)</p>", page, re.S).group(1)
+    assert len(cant.split(", ")) > 30 and not set(cant.split(", ")) & set(tracked)
+
+
 # ---- feedback ----------------------------------------------------------------------------
 
 
@@ -422,3 +455,40 @@ def test_feedback_redirects_so_reload_does_not_resubmit(client, conn, discord, m
         page = client.get(r.headers["location"])
         assert page.status_code == 200 and "Thanks" in page.text
     assert len(db.list_feedback(conn)) == 1 and len(posts(discord)) == 1
+
+
+def test_header_faq_and_cache_busted_css(client):
+    page = client.get("/faq").text
+    assert "How fast do alerts arrive?" in page
+    assert '<a href="/faq" aria-current="page">FAQ</a>' in page and 'class="brand"' in page
+    assert re.search(r'/static/style\.css\?v=[0-9a-f]{10}"', page)
+    assert "Built by" in page and 'class="star"' in page
+
+
+def test_home_shows_last_checked_from_worker_scan(client, conn, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from jobhunt.web import app as web
+    monkeypatch.setattr(web, "_last_scan", (0.0, None))
+    assert "Last checked" not in client.get("/").text  # no scan yet: line hidden
+    db.set_meta(conn, "last_scan_at", db.to_iso(datetime.now(timezone.utc) - timedelta(minutes=12)))
+    monkeypatch.setattr(web, "_last_scan", (0.0, None))
+    assert "Last checked 12 minutes ago." in client.get("/").text
+
+
+def test_manage_test_alert_posts_sample_and_shares_daily_cap(client, discord, conn):
+    subscribe(client)
+    t = token_from(discord)  # confirmation used 1 of 3 daily messages
+    for _ in range(2):
+        assert "Test alert sent" in manage(client, t, "test").text
+    body = json.loads(posts(discord)[-1].content)["embeds"][0]
+    assert body["title"].startswith("jobhunt") and "Real alerts look like this" in body["description"]
+    assert any(f["name"] == "Job ID" for f in body["fields"])
+    r = manage(client, t, "test")
+    assert r.status_code == 429 and "Daily limit" in r.text and len(posts(discord)) == 3
+
+
+def test_manage_page_loads_no_analytics(client, discord):
+    subscribe(client)
+    assert "/_vercel/insights/script.js" in client.get("/").text
+    assert "/_vercel/insights/script.js" not in client.get(f"/manage?t={token_from(discord)}").text

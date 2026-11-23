@@ -88,7 +88,7 @@ appends to on every fire; stale after 90 min).
 - The body and ETag are cached in `logs/simplify_cache.json` / `.etag`; the fetch is conditional
   (`If-None-Match`, 304 reuses the cache). A failed fetch raises; stale data is never served silently.
 
-## Database (`db.py`, schema version 4)
+## Database (`db.py`, schema version 6)
 
 SQLite by default (local dev, tests). Postgres when `DATABASE_URL` is set (psycopg 3,
 `prepare_threshold=None` for Supabase's pooler). One API; `?` placeholders are translated for
@@ -99,9 +99,10 @@ ISO-8601 UTC TEXT. `jobhunt db init` creates the schema (idempotent).
 |---|---|
 | `postings` | one row per job; PK `uid` |
 | `posting_tags` | 1:1 classification (eligible, level, countries, `terms` JSON list of "Season YYYY", ...) |
-| `subscribers` | id, `webhook_hash` (UNIQUE), `webhook_enc`, `manage_token_hash` (UNIQUE, nullable), `status` (pending/active/paused/disabled), `disabled_reason`, `countries`, `levels`, `created_at`, `activated_at`, `last_ok_at`, `fail_count`, `verify_count`, `verify_window_start`, `grad_date` ("YYYY-MM", NULL = no filter) |
+| `subscribers` | id, `webhook_hash` (UNIQUE), `webhook_enc`, `manage_token_hash` (UNIQUE, nullable), `status` (pending/active/paused/disabled), `disabled_reason`, `countries`, `levels`, `created_at`, `activated_at`, `last_ok_at`, `fail_count`, `verify_count`, `verify_window_start`, `grad_date` ("YYYY-MM", NULL = no filter), `updates_opt_out` (1 = `jobhunt broadcast` skips it; set from the "jobhunt updates" checkbox on signup and `/manage`) |
 | `deliveries` | PK (`subscriber_id`, `uid`), `status` (pending/sent/failed), `attempts`, `updated_at`, `sent_at`; cascades from both parents |
 | `rate_limits` | `key_hash`, `window_start`, `count` (per-IP subscribe limit; rows older than 2 h are pruned on write) |
+| `meta` | `key` PK, `value`; the worker writes `last_scan_at` after each scan's fetch; the home page shows it as "Last checked N minutes ago" (cached 60 s per process, hidden on error) |
 
 ### Graduation-date filter (optional)
 
@@ -116,7 +117,8 @@ Migration v3 -> v4 is additive (`ALTER TABLE subscribers ADD COLUMN IF NOT EXIST
 Postgres; PRAGMA-guarded `ADD COLUMN` on SQLite) and runs inside `init_schema` on the first
 `db.connect()` of any process (web cold start, worker, `jobhunt db init`) whose DB is below the code's
 `SCHEMA_VERSION`. Deploy order is therefore safe either way: whichever side connects first migrates;
-an old worker against a v4 DB is unaffected (it never selects `grad_date`).
+an old worker against a v4 DB is unaffected (it never selects `grad_date`). v5 -> v6 adds
+`subscribers.updates_opt_out INTEGER NOT NULL DEFAULT 0` the same way, plus the `meta` table.
 
 ## Data attribution
 
@@ -157,7 +159,9 @@ request (schema check once per process).
 | `GET /` | what it does, 3-step webhook guide, form (webhook URL, countries, levels; all checked) |
 | `POST /subscribe` | count the IP, parse the URL (`webhooks.py`), `GET` the webhook on Discord (5 s) to confirm it exists. New webhook: insert `pending`. Known webhook: rotate its manage token, keep prefs. Post one embed with `{PUBLIC_BASE_URL}/manage?t=<token>` into the channel. Always the same "check your Discord channel" page. Bad URL, missing prefs or a 404 from Discord: one generic 400 on the form. |
 | `GET /manage?t=` | status, prefs form, Activate / Pause / Resume / Delete. Never changes state (link-preview crawlers fetch GET). `Cache-Control: no-store`. |
-| `POST /manage` | token in a hidden field; actions `activate` (pending), `update`, `pause` (active), `resume` (paused), `delete`. Delete removes the subscriber (deliveries cascade) and best-effort posts "unsubscribed"; the Discord webhook itself is never deleted. |
+| `POST /manage` | token in a hidden field; actions `activate` (pending), `update`, `pause` (active), `resume` (paused), `test` (not disabled: posts one sample alert; shares the 3-per-day per-webhook message cap with confirmation links), `delete`. Delete removes the subscriber (deliveries cascade) and best-effort posts "unsubscribed"; the Discord webhook itself is never deleted. |
+| `GET /companies` | tracked companies (from config.yaml + companies.resolved.yaml), ones `added` in the last 30 days, and the can't-track list |
+| `GET /faq` | short FAQ (alert speed, missed roles, Job IDs, settings, data, adding companies) |
 | `GET /privacy`, `/terms` | short and honest |
 | `GET /healthz` | `SELECT 1`; `ok` or `error`, no details |
 

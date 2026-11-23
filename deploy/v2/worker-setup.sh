@@ -30,6 +30,7 @@ render_cron_block() {
   printf '%s\n' "*/30 * * * * cd $home && flock -n logs/scan.lock timeout 1800 .venv/bin/jobhunt scan >> logs/worker.log 2>&1"
   printf '%s\n' "0 16 * * * cd $home && .venv/bin/jobhunt heartbeat >> logs/heartbeat.log 2>&1"
   printf '%s\n' "0 9 * * * cd $home && bash deploy/v2/backup.sh >> logs/backup.log 2>&1"
+  printf '%s\n' "*/10 * * * * cd $home && flock -n logs/updates.lock sh -c 'git fetch -q origin main && .venv/bin/jobhunt updates send --ref origin/main' >> logs/updates.log 2>&1"
   printf '%s\n' "$CRON_END"
 }
 

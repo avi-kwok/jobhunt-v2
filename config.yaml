@@ -294,6 +294,7 @@ companies:
   - name: 1QBit
   - name: 3M
   - name: A Thinking Ape
+  - name: Abercrombie & Fitch
   - name: Accenture
   - name: Achievers
   - name: ACI Worldwide
@@ -410,6 +411,8 @@ companies:
   - name: Cresta
   - name: CrowdStrike
   - name: CyberArk
+    added: 2026-11-22
+    covered_by: Palo Alto Networks
   - name: D. E. Shaw
   - name: Databricks
   - name: Datadog
@@ -478,6 +481,8 @@ companies:
   - name: Harris Computer
   - name: Harvey AI
   - name: HashiCorp
+    added: 2026-11-22
+    covered_by: IBM
   - name: Hexagon
   - name: Honeywell
   - name: HOOPP
@@ -569,6 +574,7 @@ companies:
     covered_by: Oracle
   - name: New Relic
   - name: Nextdoor
+  - name: Nike
   - name: Nintendo
   - name: Nokia
   - name: Northrop Grumman
@@ -664,6 +670,8 @@ companies:
   - name: SOTI
   - name: SpaceX
   - name: Splunk
+    added: 2026-11-22
+    covered_by: Cisco
   - name: Spotify
   - name: Square
     covered_by: Block
@@ -713,6 +721,8 @@ companies:
   - name: Veeam
   - name: Veeva Systems
   - name: Verafin
+    added: 2026-11-22
+    covered_by: Nasdaq
   - name: Veralto
   - name: Vercel
   - name: Verizon
@@ -754,10 +764,13 @@ companies:
   - name: Alida
   - name: Arc'teryx
   - name: Copperleaf
+    added: 2026-11-22
+    covered_by: IFS
   - name: D-Wave
   - name: Dapper Labs
   - name: Diligent
   - name: FISPAN
+  - name: IFS
   - name: Klue
   - name: Lululemon
   - name: Mogo
@@ -772,6 +785,8 @@ companies:
   # Toronto / GTA
   - name: Ada
   - name: Borealis AI
+    added: 2026-11-22
+    covered_by: RBC
   - name: Borrowell
   - name: Canadian Tire
   - name: Celestica
@@ -793,7 +808,6 @@ companies:
   - name: Super.com
   - name: Tailscale
   - name: Top Hat
-  - name: Untether AI
   - name: Validere
   - name: Vena Solutions
   - name: Waabi
@@ -806,6 +820,8 @@ companies:
   - name: Avidbots
   - name: Axonify
   - name: Clearpath Robotics
+    added: 2026-11-22
+    covered_by: Rockwell Automation
   - name: Descartes Systems
   - name: eSentire
   - name: Miovision

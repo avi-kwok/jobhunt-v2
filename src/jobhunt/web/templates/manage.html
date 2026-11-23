@@ -18,6 +18,9 @@
 <label>Month <select name="grad_month"><option value="">No filter</option>{% for m in range(1, 13) %}<option value="{{ m }}" {% if grad_month_sel == m|string %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
 <label>Year <select name="grad_year"><option value="">No filter</option>{% for y in grad_years %}<option value="{{ y }}" {% if grad_year_sel == y|string %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></label>
 <p class="muted">Hides terms that start on or after your graduation month. Postings with no stated term are always sent.</p></fieldset>
+<fieldset><legend>jobhunt updates</legend>
+<label><input type="checkbox" name="updates" value="1" {% if not sub.updates_opt_out %}checked{% endif %}> Send me jobhunt updates: new features, fixes and additions</label>
+<p class="muted">We suggest keeping this on: updates are rare and may be important.</p></fieldset>
 <div><button type="submit" name="action" value="update" class="alt">Save preferences</button></div>
 </form>
 {% endif %}
@@ -26,6 +29,7 @@
 {% for act, label, show in [("activate", "Activate", sub.status == "pending"), ("pause", "Pause", sub.status == "active"), ("resume", "Resume", sub.status == "paused")] %}
 {% if show %}<form method="post" action="/manage"><input type="hidden" name="t" value="{{ token }}"><button type="submit" name="action" value="{{ act }}">{{ label }}</button></form>{% endif %}
 {% endfor %}
+{% if sub.status != "disabled" %}<form method="post" action="/manage"><input type="hidden" name="t" value="{{ token }}"><button type="submit" name="action" value="test" class="alt">Send me a test alert</button></form>{% endif %}
 <form method="post" action="/manage"><input type="hidden" name="t" value="{{ token }}"><button type="submit" name="action" value="delete" class="danger">Delete everything</button></form>
 </div>
 <p class="muted">Delete removes your stored webhook, preferences and delivery history. It does not touch the webhook in Discord.</p>

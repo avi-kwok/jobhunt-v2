@@ -114,3 +114,12 @@ def test_exact_non_midnight_time_keeps_discord_markdown_and_footer():
               url="https://x.example/2", posted_at=datetime(2026, 11, 18, 5, 0, 14, tzinfo=timezone.utc))
     assert _posted_field(job).startswith("<t:")
     assert "timestamp" in _embed(job)
+
+
+def test_job_id_field_shown_unless_path_like():
+    job = Job(source="workday", company="RTX", external_id="01812345", title="SWE Intern", url="u")
+    names = [f["name"] for f in _embed(job)["fields"]]
+    assert names == ["Location", "Posted", "Job ID", "Type"]
+    assert _embed(job)["fields"][2]["value"] == "01812345"
+    path = job.model_copy(update={"external_id": "/job/Cedar-Rapids/SWE-Intern_1"})
+    assert "Job ID" not in [f["name"] for f in _embed(path)["fields"]]

@@ -1,0 +1,45 @@
+{
+  "Keyword": "intern",
+  "Success": true,
+  "Pagination": {
+    "NofResults": 3,
+    "CurrentPage": 1,
+    "MaxPerPage": 96,
+    "NofPages": 2
+  },
+  "Results": [
+    {
+      "DocId": "J000704361",
+      "Score": 34.011974,
+      "Document": {
+        "title": [
+          "Engineering Intern"
+        ],
+        "link": [
+          "https://www.aptiv.com/en/jobs/search/open-positions/J000704361"
+        ],
+        "primarylocation": [
+          "Ottawa, Ontario, Canada"
+        ],
+        "primarycity": [
+          "Ottawa"
+        ],
+        "primarystate": [
+          "Ontario"
+        ],
+        "primarycountry": [
+          "Canada"
+        ],
+        "jobfamily": [
+          "Administration Support & Service"
+        ],
+        "created_moment": [
+          "2026-09-17T03:48:02.848-07:00"
+        ],
+        "jobdescription": [
+          "<p><b>Your Role</b></p><br /><p>As an Engineering Winter Intern, you will have the opportunity to apply your technical knowledge in a hands-on environment focused on embedded systems and software-related technologies. </p><br /><p>We are looking for students with a technical foundation and a genuine"
+        ]
+      }
+    }
+  ]
+}

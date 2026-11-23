@@ -22,7 +22,7 @@ def _count(conn, table):
 
 
 def test_version_and_idempotent_init(conn):
-    assert db.schema_version(conn) == 5
+    assert db.schema_version(conn) == 6
     db.init_schema(conn)
     assert _count(conn, "schema_version") == 1
     assert _count(conn, "rate_limits") == 0
@@ -281,10 +281,10 @@ def test_migrates_v2_database(tmp_path):
     raw.commit()
     raw.close()
     c = db.connect(path)
-    assert db.schema_version(c) == 5
+    assert db.schema_version(c) == 6
     assert db.tags_from_row(c.execute("SELECT * FROM posting_tags").fetchone()).terms == []
     db.init_schema(c)  # idempotent
-    assert db.schema_version(c) == 5
+    assert db.schema_version(c) == 6
     c.close()
 
 
@@ -306,7 +306,7 @@ def test_migrates_v3_database_adds_grad_date(tmp_path):
     raw.commit()
     raw.close()
     c = db.connect(path)
-    assert db.schema_version(c) == 5
+    assert db.schema_version(c) == 6
     (s,) = db.list_subscribers(c)
     assert s.grad_date is None
     db.set_grad_date(c, s.id, "2028-04")
@@ -314,11 +314,21 @@ def test_migrates_v3_database_adds_grad_date(tmp_path):
     db.set_grad_date(c, s.id, None)
     assert db.get_subscriber(c, s.id).grad_date is None
     assert db.list_feedback(c) == []  # v5 table created on upgrade
+    assert s.updates_opt_out is False  # v6 column added on upgrade
+    db.set_updates_opt_out(c, s.id, True)
+    assert db.get_subscriber(c, s.id).updates_opt_out is True
     db.init_schema(c)  # idempotent
-    assert db.schema_version(c) == 5
+    assert db.schema_version(c) == 6
     c.close()
 
 
 def test_add_subscriber_grad_date(conn):
     sid = db.add_subscriber(conn, "h1", "e", ["CA"], ["coop"], grad_date="2027-12")
     assert db.get_subscriber(conn, sid).grad_date == "2027-12"
+
+
+def test_meta_set_get_overwrites(conn):
+    assert db.get_meta(conn, "last_scan_at") is None
+    db.set_meta(conn, "last_scan_at", "a")
+    db.set_meta(conn, "last_scan_at", "b")
+    assert db.get_meta(conn, "last_scan_at") == "b"

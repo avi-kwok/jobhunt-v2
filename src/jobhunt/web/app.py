@@ -6,11 +6,14 @@ people who can read the channel) is the only credential. See docs/architecture.m
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import hmac
 import ipaddress
 import logging
 import os
-from datetime import datetime, timezone
+import time
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -21,10 +24,12 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse, Re
                                Response)
 from fastapi.templating import Jinja2Templates
 
-from .. import crypto, db, ingest, webhooks
+from .. import crypto, db, ingest, notifier, webhooks
 from ..models import Job
 
 HERE = Path(__file__).parent
+ROOT = HERE.parents[2]  # repo root: config.yaml, companies.resolved.yaml
+NEW_COMPANY_DAYS = 30
 COUNTRIES = ("CA", "US")
 LEVELS = ("internship", "coop")
 SUBSCRIBE_PER_IP_PER_HOUR = 10
@@ -48,6 +53,10 @@ templates = Jinja2Templates(
     env=jinja2.Environment(loader=jinja2.FileSystemLoader(HERE / "templates"), autoescape=True)
 )
 _CSS = (HERE / "static" / "style.css").read_bytes()
+# Changes with the stylesheet, so browsers fetch a new copy right after a deploy.
+templates.env.globals["css_v"] = hashlib.sha256(_CSS).hexdigest()[:10]
+LAST_SCAN_TTL = 60  # seconds the home page reuses the "last checked" lookup
+_last_scan: tuple[float, datetime | None] = (0.0, None)
 _schema_ready: set[str] = set()
 
 
@@ -151,7 +160,54 @@ def _webhook_exists(wh: webhooks.Webhook) -> bool:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    return _page(request, "index.html", error=None, **_grad_ctx())
+    return _page(request, "index.html", error=None, last_checked=_last_checked(), **_grad_ctx())
+
+
+def _last_checked() -> str | None:
+    """'N minutes ago' for the worker's last finished scan; None if unknown (page still renders)."""
+    global _last_scan
+    if time.monotonic() - _last_scan[0] > LAST_SCAN_TTL:
+        try:
+            conn = _open()
+            try:
+                raw = db.get_meta(conn, "last_scan_at")
+            finally:
+                conn.close()
+            _last_scan = (time.monotonic(), datetime.fromisoformat(raw) if raw else None)
+        except Exception as exc:  # the home page must not fail because the DB is slow or down
+            log.warning("last_scan_at lookup failed: %s", type(exc).__name__)
+            return None
+    when = _last_scan[1]
+    if when is None:
+        return None
+    mins = max(0, int((datetime.now(timezone.utc) - when).total_seconds() // 60))
+    if mins < 1:
+        return "just now"
+    if mins < 120:
+        return f"{mins} minute{'s' * (mins != 1)} ago"
+    return f"{mins // 60} hours ago"
+
+
+@app.get("/faq", response_class=HTMLResponse)
+def faq(request: Request):
+    return _page(request, "faq.html")
+
+
+@functools.lru_cache(maxsize=1)
+def _tracked_companies() -> tuple[list[str], list[tuple[date, str]]]:
+    """(all tracked names, [(added, name)]); the config files only change with a deploy."""
+    from ..config import load_config  # lazy: only this page needs the watchlist
+    cos = [c for c in load_config(ROOT / "config.yaml", ROOT / "companies.resolved.yaml").companies
+           if (c.ats or c.covered_by) and c.ats != "simplify"]
+    return sorted((c.name for c in cos), key=str.casefold), [(c.added, c.name) for c in cos if c.added]
+
+
+@app.get("/companies", response_class=HTMLResponse)
+def companies(request: Request):
+    tracked, added = _tracked_companies()
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=NEW_COMPANY_DAYS)
+    new = sorted((n for d, n in added if d >= cutoff), key=str.casefold)
+    return _page(request, "companies.html", tracked=tracked, new=new, new_days=NEW_COMPANY_DAYS)
 
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -230,6 +286,7 @@ def healthz():
 # ---- subscribe -------------------------------------------------------------------------
 
 _BAD = "We could not use that webhook. Check the URL and try again."
+_NO_PREFS = "Pick at least one country and one level."
 
 
 @app.post("/subscribe", response_class=HTMLResponse)
@@ -240,6 +297,7 @@ def subscribe(
     levels: list[str] = Form([]),
     grad_month: str = Form(""),
     grad_year: str = Form(""),
+    updates: str = Form(""),
 ):
     conn = _open()
     try:
@@ -247,6 +305,8 @@ def subscribe(
         if not db.rate_limit_hit(conn, ip_key, SUBSCRIBE_PER_IP_PER_HOUR):
             return _page(request, "check.html")
         prefs = _prefs(countries, levels)
+        if prefs is None:  # an all-unticked signup would never get an alert
+            return _page(request, "index.html", 400, error=_NO_PREFS, **_grad_ctx())
         grad_ok, grad = _grad_date(grad_month, grad_year)
         try:
             wh = webhooks.parse(webhook_url)
@@ -266,23 +326,38 @@ def subscribe(
             )
             if sub_id is None:  # lost a race with a concurrent subscribe: the winner posts
                 return _page(request, "check.html")
+            if not updates:
+                db.set_updates_opt_out(conn, sub_id, True)
             created = True
         else:
             sub_id = sub.id
         if not db.take_verify_slot(conn, sub_id, MESSAGES_PER_WEBHOOK_PER_DAY):
             return _page(request, "check.html")
 
-        posted = _discord_post(wh, {
-            "title": "Activate your jobhunt alerts",
-            "description": (
-                "Someone asked for SWE internship and co-op alerts in this channel. "
-                f"To activate them, open this private link and press Activate:\n"
-                f"{_base_url()}/manage?t={token}\n\n"
-                "Anyone who can read this channel can use the link. "
-                "If this was not you, ignore it: nothing is sent until it is activated."
-            ),
-            "color": 0x5865F2,
-        })
+        link = f"{_base_url()}/manage?t={token}"
+        if created or sub.status in ("pending", "disabled"):  # disabled goes back to pending
+            embed = {
+                "title": "Activate your jobhunt alerts",
+                "description": (
+                    "Someone asked for SWE internship and co-op alerts in this channel. "
+                    f"To activate them, open this private link and press Activate:\n{link}\n\n"
+                    "Anyone who can read this channel can use the link. "
+                    "If this was not you, ignore it: nothing is sent until it is activated."
+                ),
+                "color": 0x5865F2,
+            }
+        else:  # already subscribed: the form doubles as "send me a new manage link"
+            embed = {
+                "title": "Your new jobhunt manage link",
+                "description": (
+                    "Someone asked for a new link to manage this channel's jobhunt alerts "
+                    f"(countries, levels, graduation date, updates, pause, delete):\n{link}\n\n"
+                    "The old link no longer works. Anyone who can read this channel can use "
+                    "the new one. Your current settings are unchanged."
+                ),
+                "color": 0x5865F2,
+            }
+        posted = _discord_post(wh, embed)
         if not posted:
             db.refund_verify_slot(conn, sub_id)
             if created:  # nothing existed before, so failing visibly leaks nothing
@@ -313,6 +388,25 @@ def _manage_page(request, sub, token, notice=None, error=None, status=200):
                  **_grad_ctx(sub.grad_date))
 
 
+def _send_test_alert(conn, sub) -> tuple[str | None, int]:
+    """Post one sample alert (shares the per-webhook daily message cap with confirmations)."""
+    try:
+        wh = webhooks.parse(crypto.decrypt_url(sub.webhook_enc))
+    except (webhooks.WebhookError, crypto.CryptoError):
+        return "We could not read your webhook. Subscribe again from the home page.", 400
+    if not db.take_verify_slot(conn, sub.id, MESSAGES_PER_WEBHOOK_PER_DAY):
+        return "Daily limit for test messages reached. Try again tomorrow.", 429
+    job = Job(source="test", company="jobhunt", external_id="TEST-0001",
+              title="Test alert: Software Engineer Intern", location="Toronto, ON, Canada",
+              url=_base_url() + "/faq", posted_at=datetime.now(timezone.utc))
+    embed = notifier.alert_embed(job, ["CA"], "internship", ["software"])
+    embed["description"] = "This is a test from jobhunt. Real alerts look like this."
+    if not _discord_post(wh, embed):
+        db.refund_verify_slot(conn, sub.id)
+        return "Discord did not accept the test message. Check that the webhook still exists.", 502
+    return None, 200
+
+
 @app.get("/manage", response_class=HTMLResponse)
 def manage_get(request: Request, t: str = ""):
     conn = _open()
@@ -334,6 +428,7 @@ def manage_post(
     levels: list[str] = Form([]),
     grad_month: str = Form(""),
     grad_year: str = Form(""),
+    updates: str = Form(""),
 ):
     conn = _open()
     try:
@@ -355,13 +450,17 @@ def manage_post(
             prefs = _prefs(countries, levels)
             grad_ok, grad = _grad_date(grad_month, grad_year)
             if prefs is None:
-                error, status = "Pick at least one country and one level.", 400
+                error, status = _NO_PREFS, 400
             elif not grad_ok:
                 error, status = "Pick a valid graduation month and year, or leave both blank.", 400
             else:
                 db.set_prefs(conn, sub.id, *prefs)
                 db.set_grad_date(conn, sub.id, grad)
+                db.set_updates_opt_out(conn, sub.id, not updates)
                 notice = "Preferences saved."
+        elif action == "test" and sub.status != "disabled":
+            error, status = _send_test_alert(conn, sub)
+            notice = None if error else "Test alert sent. Check your Discord channel."
         elif action == "delete":
             try:
                 wh = webhooks.parse(crypto.decrypt_url(sub.webhook_enc))

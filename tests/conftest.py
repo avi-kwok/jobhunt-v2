@@ -26,6 +26,10 @@ def _env(monkeypatch, secret_key, tmp_path):
     from jobhunt import llm_tiebreak
 
     monkeypatch.setattr(llm_tiebreak, "USAGE_PATH", tmp_path / "llm_usage.json")
+    from jobhunt import cli
+
+    monkeypatch.setattr(cli, "HALTED_PATH", tmp_path / "halted_companies.json")
+    monkeypatch.setattr(cli, "RATE_WARN_PATH", tmp_path / "rate_warnings.json")
 
 
 @pytest.fixture(

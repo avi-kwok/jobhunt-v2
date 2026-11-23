@@ -44,18 +44,19 @@ def test_entry_guard_runs_main(tmp_path, mode):
     assert r.stdout == "RAN\n"
 
 
-def test_block_has_three_jobs_with_required_shape():
+def test_block_has_four_jobs_with_required_shape():
     out = _bash(f'render_cron_block "{HOME_DIR}"')
     lines = out.splitlines()
     assert lines[0].startswith("# BEGIN jobhunt-v2") and lines[-1] == "# END jobhunt-v2"
     jobs = [ln for ln in lines if not ln.startswith("#")]
-    assert len(jobs) == 3
-    scan, beat, backup = jobs
+    assert len(jobs) == 4
+    scan, beat, backup, updates = jobs
     assert scan.startswith("*/30 * * * * cd " + HOME_DIR)
     assert "flock -n" in scan and "timeout 1800" in scan and "jobhunt scan" in scan
     assert scan.endswith(">> logs/worker.log 2>&1")
     assert beat.startswith("0 16 * * * ") and "jobhunt heartbeat" in beat
     assert backup.startswith("0 9 * * * ") and "deploy/v2/backup.sh" in backup
+    assert updates.startswith("*/10 * * * * ") and "updates send --ref origin/main" in updates
 
 
 def test_merge_into_empty_crontab():

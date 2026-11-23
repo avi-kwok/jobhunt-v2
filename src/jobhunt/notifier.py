@@ -18,8 +18,9 @@ COLOR_BOTH, COLOR_UNKNOWN = 0x9B59B6, 0x95A5A6  # CA+US multi-location / remote 
 MAX_EMBEDS_PER_MESSAGE = 10
 # Discord caps a message at 6000 embed chars; 10 embeds -> keep each under ~600.
 # Budget: title 180 ("<company> — <position>") + location 100 + posted 60
-# + type 100 + names ~20 (~460 worst case).
+# + type 100 + job id 40 + names ~26 (~506 worst case).
 TITLE_MAX, COMPANY_MAX, LOCATION_MAX, POSTED_MAX, TYPE_MAX = 180, 60, 100, 60, 100
+JOB_ID_MAX = 40
 TITLE_SEP = " — "
 MIN_POSITION = 40  # the position is never clipped below this (COMPANY_MAX keeps it true)
 _MD_SPECIAL = re.compile(r"([\\*_~`|>\[\]()#<])")
@@ -113,6 +114,11 @@ def alert_embed(
             {"name": "Type", "value": _clip(why, TYPE_MAX), "inline": False},
         ],
     }
+    # Same-title openings (one per team/site) look like repeats; the ID shows they differ.
+    # Path-like ids (Workday postings without a req id) are noise, so they are left out.
+    if job.external_id and "/" not in job.external_id:
+        embed["fields"].insert(2, {"name": "Job ID", "value": _clip(_md_escape(job.external_id), JOB_ID_MAX),
+                                   "inline": True})
     url = _safe_url(job.url)
     if url:
         embed["url"] = url

@@ -1,0 +1,78 @@
+{
+  "Keyword": "student",
+  "Success": true,
+  "Pagination": {
+    "NofResults": 2,
+    "CurrentPage": 1,
+    "MaxPerPage": 96,
+    "NofPages": 1
+  },
+  "Results": [
+    {
+      "DocId": "J000705140",
+      "Score": 34.253857,
+      "Document": {
+        "title": [
+          "Student Engineer"
+        ],
+        "link": [
+          "https://www.aptiv.com/en/jobs/search/open-positions/J000705140"
+        ],
+        "primarylocation": [
+          "Gothenburg, Vastmanland County, Sweden"
+        ],
+        "primarycity": [
+          "Gothenburg"
+        ],
+        "primarystate": [
+          "Vastmanland County"
+        ],
+        "primarycountry": [
+          "Sweden"
+        ],
+        "jobfamily": [
+          "Administration Support & Service"
+        ],
+        "created_moment": [
+          "2026-09-29T01:40:27.172-07:00"
+        ],
+        "jobdescription": [
+          "<p style=\"color:!important\"><span style=\"color:#000000\"><b>Student Engineer </b></span></p><br /><p><b><span style=\"font-size:inherit\">Aptiv Gothenburg Student Engineer Initiative</span></b></p><p><span style=\"font-size:inherit\">Each year, we welcome several Student Engineers to join our team in Got"
+        ]
+      }
+    },
+    {
+      "DocId": "J000702905",
+      "Score": 33.903385,
+      "Document": {
+        "title": [
+          "Sales Intern"
+        ],
+        "link": [
+          "https://www.aptiv.com/en/jobs/search/open-positions/J000702905"
+        ],
+        "primarylocation": [
+          "Troy, Michigan, United States"
+        ],
+        "primarycity": [
+          "Troy"
+        ],
+        "primarystate": [
+          "Michigan"
+        ],
+        "primarycountry": [
+          "United States"
+        ],
+        "jobfamily": [
+          "Sales Internship"
+        ],
+        "created_moment": [
+          "2026-08-25T09:58:26.571-07:00"
+        ],
+        "jobdescription": [
+          "<p><b>Your Role</b></p><p>The Sales Intern will operate in a dynamic, rapidly changing environment which requires flexibility, adaptability, initiative as well as excellent organization and problem-solving skills.\u00a0 This position will be located in Troy, MI.</p><p>\u00a0</p><p>\u00a0<b>Your Responsibilities</b"
+        ]
+      }
+    }
+  ]
+}
