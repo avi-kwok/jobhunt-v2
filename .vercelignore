@@ -5,4 +5,7 @@
 !requirements.txt
 !.python-version
 !vercel.json
+# /companies reads the watchlist (public repo files, no secrets).
+!config.yaml
+!companies.resolved.yaml
 !src

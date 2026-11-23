@@ -492,3 +492,9 @@ def test_manage_page_loads_no_analytics(client, discord):
     subscribe(client)
     assert "/_vercel/insights/script.js" in client.get("/").text
     assert "/_vercel/insights/script.js" not in client.get(f"/manage?t={token_from(discord)}").text
+
+
+def test_vercel_uploads_the_watchlist_files_the_companies_page_reads():
+    from pathlib import Path
+    allow = Path(__file__).parents[1].joinpath(".vercelignore").read_text().split()
+    assert "!config.yaml" in allow and "!companies.resolved.yaml" in allow
