@@ -42,6 +42,7 @@ def test_pcsx_parses_fields():
     assert j.location == "Plano,Texas,United States" and j.department == "Eng"
     assert j.posted_at.year == 2026
     assert len(respx.calls) == len(QUERIES)
+    assert all(c.request.url.params["sort_by"] == "timestamp" for c in respx.calls)
 
 
 @respx.mock

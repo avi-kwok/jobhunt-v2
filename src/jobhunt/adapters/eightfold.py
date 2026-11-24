@@ -53,7 +53,9 @@ class EightfoldAdapter(Adapter):
     # -- one page, either endpoint ------------------------------------------
     def _page(self, host: str, domain: str, query: str, start: int, mode: str):
         url = (PCSX if mode == "pcsx" else LEGACY).format(host=host)
-        params = {"domain": domain, "query": query, "start": start}
+        # Newest first: the default relevance order buries fresh postings past the page cap
+        # (Lockheed has 200+ "intern" hits). Legacy ignores sort_by; its tenants are small.
+        params = {"domain": domain, "query": query, "start": start, "sort_by": "timestamp"}
         if mode == "legacy":
             params["num"] = PAGE_SIZE
         resp = request_with_retry(self.client, "GET", url, params=params)
